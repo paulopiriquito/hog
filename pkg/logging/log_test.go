@@ -83,6 +83,51 @@ func TestNewLogger_customFormat(t *testing.T) {
 	}
 }
 
+func TestNewLogger_jsonFormat(t *testing.T) {
+	buff := bytes.NewBuffer(make([]byte, 1024))
+	SetFormatterSelector(func(w io.Writer) string {
+		return ActivePattern
+	})
+	logger, err := NewLogger(newExtraConfig("DEBUG", "json", ""), TestFormatWriter{buff})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	logger.Critical(criticalMsg)
+	outputMsg := strings.ReplaceAll(buff.String(), "\x00", "")
+	if !isJson(outputMsg) {
+		t.Error("The output doesn't contain a json formatted log line")
+	}
+}
+
+func TestNewLogger_requiredFields(t *testing.T) {
+	buff := bytes.NewBuffer(make([]byte, 1024))
+	SetFormatterSelector(func(w io.Writer) string {
+		return ActivePattern
+	})
+	logger, err := NewLogger(newExtraConfig("DEBUG", "json", ""), TestFormatWriter{buff})
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	logger.Critical(criticalMsg)
+	outputMsg := strings.ReplaceAll(buff.String(), "\x00", "")
+	if !isJson(outputMsg) {
+		t.Error("The output doesn't contain a json formatted log line")
+	}
+	requiredFields := []string{"level", "message", "timestamp", "module", "version", "service", "env"}
+	js := make(map[string]interface{})
+	if err := json.Unmarshal([]byte(outputMsg), &js); err != nil {
+		t.Error(err)
+		return
+	}
+	for _, field := range requiredFields {
+		if !strings.Contains(outputMsg, field) {
+			t.Errorf("The output doesn't contain the required field: %s", field)
+		}
+	}
+}
+
 func TestNewLogger_unknownLevel(t *testing.T) {
 	_, err := NewLogger(newExtraConfig("UNKNOWN", "default", ""), bytes.NewBuffer(make([]byte, 1024)))
 	if err == nil {
@@ -103,6 +148,7 @@ func newExtraConfig(level, format, customFormat string) map[string]interface{} {
 			"stdout":        true,
 			"format":        format,
 			"custom_format": customFormat,
+			"tags":          map[string]string{"version": "v1.0.0", "service": "hog", "env": "test"},
 		},
 	}
 }

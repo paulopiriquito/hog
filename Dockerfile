@@ -1,23 +1,23 @@
 ARG GOLANG_VERSION
 ARG ALPINE_VERSION
+
 FROM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} as builder
 
-RUN apk --no-cache --virtual .build-deps add make gcc musl-dev binutils-gold
+RUN apk --no-cache --virtual .build-deps add make gcc musl-dev binutils-gold git
 
 COPY . /app
 WORKDIR /app
 
-# Build and validate plugin before building KrakenD
-RUN make build-plugin
-RUN make test-plugin
-
 # Build KrakenD binary
-RUN make build
+RUN make all
 
 
 FROM alpine:${ALPINE_VERSION}
+ARG KRAKEND_VERSION
 
-LABEL maintainer="community@krakend.io"
+LABEL core_maintainer="community@krakend.io"
+LABEL maintainer="paulo.piriquito@outlook.pt"
+LABEL krakend_version="${KRAKEND_VERSION}"
 
 RUN apk upgrade --no-cache --no-interactive && apk add --no-cache ca-certificates tzdata && \
     adduser -u 1000 -S -D -H krakend && \

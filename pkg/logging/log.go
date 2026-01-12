@@ -21,6 +21,7 @@ var (
 	ErrWrongConfig = fmt.Errorf("getting the extra config for the krakend-gologging module")
 	// DefaultPattern is the pattern to use for rendering the logs
 	LogstashPattern          = `{"@timestamp":"%{time:2006-01-02T15:04:05.000+00:00}", "@version": 1, "level": "%{level}", "message": "%{message}", "module": "%{module}"}`
+	JsonFormat               = `{"timestamp":"%{time:2006-01-02T15:04:05.000+00:00}", "level": "%{level}", "message": "%{message}", "module": "%{module}"}`
 	DefaultPattern           = ` %{time:2006/01/02 - 15:04:05.000} %{color}▶ %{level}%{color:reset} %{message}`
 	ActivePattern            = DefaultPattern
 	defaultFormatterSelector = func(io.Writer) string { return ActivePattern }
@@ -63,6 +64,11 @@ func NewLogger(cfg config.ExtraConfig, ws ...io.Writer) (logging.Logger, error) 
 
 	if logConfig.Format == "custom" {
 		ActivePattern = logConfig.CustomFormat
+		logConfig.Prefix = ""
+	}
+
+	if logConfig.Format == "json" {
+		ActivePattern = buildJsonPatternWithTags(logConfig.Tags)
 		logConfig.Prefix = ""
 	}
 
@@ -129,6 +135,9 @@ func ConfigGetter(e config.ExtraConfig) interface{} {
 	if v, ok := tmp["custom_format"].(string); ok {
 		cfg.CustomFormat = v
 	}
+	if v, ok := tmp["tags"].(map[string]string); ok {
+		cfg.Tags = v
+	}
 	return cfg
 }
 
@@ -142,6 +151,7 @@ type Config struct {
 	Prefix         string
 	Format         string
 	CustomFormat   string
+	Tags           map[string]string
 }
 
 // Logger is a wrapper over a github.com/op/go-logging logger
@@ -219,6 +229,15 @@ func parseSyslogFacility(name string) syslog.Priority {
 	default:
 		return defaultSyslogFacility
 	}
+}
+
+func buildJsonPatternWithTags(tags map[string]string) string {
+	pattern := strings.TrimSuffix(JsonFormat, "}")
+	for key, value := range tags {
+		pattern += fmt.Sprintf(`, "%s": "%s"`, key, value)
+	}
+	pattern += `}`
+	return pattern
 }
 
 func parseSyslogSeverity(level string) syslog.Priority {
