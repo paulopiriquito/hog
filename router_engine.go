@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	botdetector "github.com/krakend/krakend-botdetector/v2/gin"
+	gologging "github.com/krakend/krakend-gologging/v2"
 	httpsecure "github.com/krakend/krakend-httpsecure/v2/gin"
 	lua "github.com/krakend/krakend-lua/v2/router/gin"
 	opencensus "github.com/krakend/krakend-opencensus/v2/router/gin"
@@ -18,6 +19,10 @@ import (
 // NewEngine creates a new gin engine with some default values and a secure middleware
 func NewEngine(cfg config.ServiceConfig, opt luragin.EngineOptions) *gin.Engine {
 	engine := luragin.NewEngine(cfg, opt)
+
+	// Add trace context extraction and access logging middleware early in the chain
+	engine.Use(gologging.TraceContextMiddleware())
+	engine.Use(gologging.AccessLogger(opt.Logger))
 
 	engine.NoRoute(opencensus.HandlerFunc(&config.EndpointConfig{Endpoint: "NoRoute"}, defaultHandler, nil))
 	engine.NoMethod(opencensus.HandlerFunc(&config.EndpointConfig{Endpoint: "NoMethod"}, defaultHandler, nil))

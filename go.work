@@ -3,9 +3,12 @@ go 1.25.3
 use (
 	.
 	plugins/static-content
+	plugins/authenticator
 	pkg/headers
 	pkg/paths
 	pkg/logging
+	pkg/session
+	pkg/pluginlogger
 )
 
 replace (

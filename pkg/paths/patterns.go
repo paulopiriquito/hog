@@ -43,12 +43,21 @@ func MatchesWildcard(path, pattern string) bool {
 		return normPath == normPattern
 	}
 
+	// Special case: pattern like "/path/*" should match "/path" as well
+	// This handles cases like /something/ matching /something/*
+	if strings.HasSuffix(normPattern, "/*") {
+		prefix := strings.TrimSuffix(normPattern, "/*")
+		if normPath == prefix {
+			return true
+		}
+	}
+
 	// Convert wildcard pattern to regex:
 	// 1. Escape special regex characters
-	// 2. Replace \* with .+ to match at least one character
+	// 2. Replace \* with .* to match zero or more characters
 	// 3. Anchor to match entire string
 	regexPattern := regexp.QuoteMeta(normPattern)
-	regexPattern = strings.ReplaceAll(regexPattern, `\*`, `.+`)
+	regexPattern = strings.ReplaceAll(regexPattern, `\*`, `.*`)
 	regexPattern = "^" + regexPattern + "$"
 
 	matched, err := regexp.MatchString(regexPattern, normPath)

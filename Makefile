@@ -29,9 +29,13 @@ OS_TAG :=
 EXTRA_LDFLAGS :=
 
 # Plugin configuration
-PLUGIN_DIR := plugins/static-content
-PLUGIN_NAME := hog-static-content
-PLUGIN_OUTPUT := $(PLUGIN_DIR)/$(PLUGIN_NAME).so
+STATIC_PLUGIN_DIR := plugins/static-content
+STATIC_PLUGIN_NAME := hog-static-content
+STATIC_PLUGIN_OUTPUT := $(STATIC_PLUGIN_DIR)/$(STATIC_PLUGIN_NAME).so
+
+AUTH_PLUGIN_DIR := plugins/authenticator
+AUTH_PLUGIN_NAME := hog-authenticator
+AUTH_PLUGIN_OUTPUT := $(AUTH_PLUGIN_DIR)/$(AUTH_PLUGIN_NAME).so
 
 FPM_OPTS=-s dir -v $(VERSION) -n $(PKGNAME) \
   --license "$(LICENSE)" \
@@ -60,15 +64,29 @@ RPM_OPTS =--rpm-user $(USER) \
 
 all: test
 
-build-plugin:
-	@echo "Building plugin $(PLUGIN_NAME)..."
-	@cd $(PLUGIN_DIR) && go get .
-	@cd $(PLUGIN_DIR) && go build -buildmode=plugin -o $(PLUGIN_NAME).so .
-	@echo "Plugin built successfully at $(PLUGIN_OUTPUT)"
+build-static-plugin:
+	@echo "Building plugin $(STATIC_PLUGIN_NAME)..."
+	@cd $(STATIC_PLUGIN_DIR) && go get .
+	@cd $(STATIC_PLUGIN_DIR) && go build -buildmode=plugin -o $(STATIC_PLUGIN_NAME).so .
+	@echo "Plugin built successfully at $(STATIC_PLUGIN_OUTPUT)"
 
-test-plugin: build-plugin
-	@echo "Testing plugin..."
-	@cd $(PLUGIN_DIR) && go test -v .
+build-auth-plugin:
+	@echo "Building plugin $(AUTH_PLUGIN_NAME)..."
+	@cd $(AUTH_PLUGIN_DIR) && go get .
+	@cd $(AUTH_PLUGIN_DIR) && go build -buildmode=plugin -o $(AUTH_PLUGIN_NAME).so .
+	@echo "Plugin built successfully at $(AUTH_PLUGIN_OUTPUT)"
+
+build-plugin: build-static-plugin build-auth-plugin
+
+test-static-plugin: build-static-plugin
+	@echo "Testing static-content plugin..."
+	@cd $(STATIC_PLUGIN_DIR) && go test -v .
+
+test-auth-plugin: build-auth-plugin
+	@echo "Testing authenticator plugin..."
+	@cd $(AUTH_PLUGIN_DIR) && go test -v .
+
+test-plugin: test-static-plugin test-auth-plugin
 
 build: build-plugin cmd/krakend-ce/schema/schema.json
 	@echo "Building the binary..."
@@ -80,6 +98,7 @@ build: build-plugin cmd/krakend-ce/schema/schema.json
 
 test: build
 	go test -v ./plugins/static-content
+	go test -v ./plugins/authenticator
 	go test -v ./pkg/headers
 	go test -v ./pkg/paths
 	go test -v ./pkg/logging
@@ -201,5 +220,5 @@ clean:
 	rm -f ${BIN_NAME}
 	rm -rf vendor/
 	rm -f cmd/krakend-ce/schema/schema.json
-	rm -f $(PLUGIN_OUTPUT)
-	rm -f $(PLUGIN_OUTPUT)
+	rm -f $(STATIC_PLUGIN_OUTPUT)
+	rm -f $(AUTH_PLUGIN_OUTPUT)

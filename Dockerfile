@@ -26,10 +26,14 @@ RUN apk upgrade --no-cache --no-interactive && apk add --no-cache ca-certificate
 
 COPY --from=builder /app/krakend /usr/bin/krakend
 COPY --from=builder /app/plugins/static-content/hog-static-content.so /etc/krakend/plugins/
+COPY --from=builder /app/plugins/authenticator/hog-authenticator.so /etc/krakend/plugins/
 
 USER 1000
 
 WORKDIR /etc/krakend
+
+ENV USAGE_DISABLE=1
+ENV KRAKEND_PORT=8080
 
 ENTRYPOINT [ "/usr/bin/krakend" ]
 CMD [ "run", "-c", "/etc/krakend/krakend.json" ]

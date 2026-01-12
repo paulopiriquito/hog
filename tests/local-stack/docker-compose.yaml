@@ -1,0 +1,167 @@
+name: hog-local-stack
+services:
+  nginx:
+    image: nginx:alpine
+    restart: always
+    ports:
+      - "3000:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/test-auth-flow.html:/usr/share/nginx/html/test-auth-flow.html:ro
+    depends_on:
+      hog:
+        condition: service_started
+    networks:
+      - hog-network
+
+  hog:
+    build:
+      context: ../../
+      args:
+        KRAKEND_VERSION: 2.12.0
+        GOLANG_VERSION: 1.25.3
+        ALPINE_VERSION: 3.21
+      tags:
+        - ghcr.io/paulopiriquito/hog:local
+      platforms:
+        - linux/arm64
+        - linux/amd64
+    restart: always
+    ports:
+      - "8090:8090"  # Prometheus metrics endpoint
+    volumes:
+      - ./hog/krakend.json:/etc/krakend/krakend.json
+    environment:
+      - SERVICE=hog
+      - LOG_LEVEL=DEBUG
+      - PORT=8080
+      - USAGE_DISABLE=1
+      # IDP Configuration
+      - IDP_ISSUER=http://dex:5556
+      - IDP_CLIENT_ID=krakend
+      - IDP_CLIENT_SECRET=krakend-secret
+      # Session Configuration
+      - AUTH_COOKIE_KEY=abcdefghijklmnopqrstuvwxyz123456
+      - AUTH_COOKIE_NAME=auth_session
+      # Trace Configuration
+      - TRACE_FORMAT=otel
+      - OTEL_SERVICE_NAME=hog-gateway
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+      - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+    depends_on:
+      dex:
+        condition: service_started
+    networks:
+      - hog-network
+
+  dex:
+    image: dexidp/dex:latest
+    restart: always
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dex/dex-config.yaml:/etc/dex/config.yaml
+      - dex-data:/var/dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    networks:
+      - hog-network
+
+  # =============================================================================
+  # Observability Stack
+  # =============================================================================
+
+  # Grafana Alloy - Unified telemetry collector (replaces OTEL Collector)
+  alloy:
+    image: grafana/alloy:latest
+    restart: always
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "12345:12345" # Alloy UI
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    networks:
+      - hog-network
+
+  # Grafana Tempo - Distributed tracing backend
+  tempo:
+    image: grafana/tempo:latest
+    restart: always
+    ports:
+      - "3200:3200"   # Tempo query API
+      - "9095:9095"   # gRPC
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    command:
+      - -config.file=/etc/tempo/tempo.yaml
+    networks:
+      - hog-network
+
+  # Grafana Loki - Log aggregation
+  loki:
+    image: grafana/loki:latest
+    restart: always
+    ports:
+      - "3100:3100"   # Loki API
+    volumes:
+      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/var/loki
+    command:
+      - -config.file=/etc/loki/loki.yaml
+    networks:
+      - hog-network
+
+  # Prometheus - Metrics storage
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    ports:
+      - "9090:9090"   # Prometheus UI
+    volumes:
+      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=24h
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    networks:
+      - hog-network
+
+  # Grafana - Visualization
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    ports:
+      - "3001:3000"   # Grafana UI
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+    networks:
+      - hog-network
+
+networks:
+  hog-network:
+    driver: bridge
+
+volumes:
+  dex-data:
+  tempo-data:
+  loki-data:
+  prometheus-data:
+  grafana-data:

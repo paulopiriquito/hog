@@ -72,6 +72,11 @@ func NewLogger(cfg config.ExtraConfig, ws ...io.Writer) (logging.Logger, error) 
 		logConfig.Prefix = ""
 	}
 
+	if logConfig.Format == "" && len(logConfig.Tags) > 0 {
+		newDefaultPattern := buildTextPatternWithTags(logConfig.Tags)
+		ActivePattern = newDefaultPattern
+	}
+
 	var backends []gologging.Backend
 	for _, w := range ws {
 		var pattern string
@@ -135,23 +140,39 @@ func ConfigGetter(e config.ExtraConfig) interface{} {
 	if v, ok := tmp["custom_format"].(string); ok {
 		cfg.CustomFormat = v
 	}
-	if v, ok := tmp["tags"].(map[string]string); ok {
-		cfg.Tags = v
+	if v, ok := tmp["tags"].(map[string]interface{}); ok {
+		cfg.Tags = make(map[string]string)
+		for key, value := range v {
+			if strValue, ok := value.(string); ok {
+				cfg.Tags[key] = strValue
+			}
+		}
 	}
-	return cfg
-}
 
-// Config is the custom config struct containing the params for the logger
-type Config struct {
-	Level          string
-	StdOut         bool
-	Syslog         bool
-	SysLogFacility syslog.Priority
-	SyslogSeverity syslog.Priority
-	Prefix         string
-	Format         string
-	CustomFormat   string
-	Tags           map[string]string
+	// New access logging and tracing config
+	cfg.AccessLog = true // default to enabled
+	if v, ok := tmp["access_log"].(bool); ok {
+		cfg.AccessLog = v
+	}
+
+	if v, ok := tmp["skip_paths"].([]interface{}); ok {
+		cfg.SkipPaths = make([]string, 0, len(v))
+		for _, path := range v {
+			if strPath, ok := path.(string); ok {
+				cfg.SkipPaths = append(cfg.SkipPaths, strPath)
+			}
+		}
+	}
+
+	cfg.TraceFormat = TraceFormatOTEL // default to OTEL
+	if v, ok := tmp["trace_format"].(string); ok {
+		cfg.TraceFormat = v
+	}
+
+	// Store config for access by other packages
+	SetActiveConfig(&cfg)
+
+	return cfg
 }
 
 // Logger is a wrapper over a github.com/op/go-logging logger
@@ -159,12 +180,44 @@ type Logger struct {
 	logger *gologging.Logger
 }
 
+// enrichMessage adds trace info to the message if available
+func (l Logger) enrichMessage(v ...interface{}) []interface{} {
+	if len(v) == 0 {
+		return v
+	}
+
+	cfg := GetActiveConfig()
+	if cfg == nil {
+		return v
+	}
+
+	// For non-JSON format, append trace info to the message
+	info := GetCurrentTraceInfo()
+	if info != nil && info.TraceID != "" {
+		// Convert first arg to string and append trace info
+		msg := fmt.Sprint(v...)
+		switch cfg.TraceFormat {
+		case TraceFormatOTEL:
+			return []interface{}{fmt.Sprintf("%s, \"trace_id\": \"%s\", \"span_id\": \"%s\"", msg, info.TraceID, info.SpanID)}
+		case TraceFormatDatadog:
+			return []interface{}{fmt.Sprintf("%s, \"dd.trace_id\": \"%s\", \"dd.span_id\": \"%s\"", msg, info.DDTraceID, info.DDSpanID)}
+		case TraceFormatBoth:
+			return []interface{}{fmt.Sprintf("%s, \"trace_id\": \"%s\", \"span_id\": \"%s\", \"dd.trace_id\": \"%s\", \"dd.span_id\": \"%s\"",
+				msg, info.TraceID, info.SpanID, info.DDTraceID, info.DDSpanID)}
+		default:
+			return []interface{}{fmt.Sprintf("%s, \"trace_id\": \"%s\", \"span_id\": \"%s\"", msg, info.TraceID, info.SpanID)}
+		}
+	}
+
+	return v
+}
+
 // Debug implements the logger interface
 func (l Logger) Debug(v ...interface{}) {
 	if !l.logger.IsEnabledFor(gologging.DEBUG) {
 		return
 	}
-	l.logger.Debug(v...)
+	l.logger.Debug(l.enrichMessage(v...)...)
 }
 
 // Info implements the logger interface
@@ -172,7 +225,7 @@ func (l Logger) Info(v ...interface{}) {
 	if !l.logger.IsEnabledFor(gologging.INFO) {
 		return
 	}
-	l.logger.Info(v...)
+	l.logger.Info(l.enrichMessage(v...)...)
 }
 
 // Warning implements the logger interface
@@ -180,7 +233,7 @@ func (l Logger) Warning(v ...interface{}) {
 	if !l.logger.IsEnabledFor(gologging.WARNING) {
 		return
 	}
-	l.logger.Warning(v...)
+	l.logger.Warning(l.enrichMessage(v...)...)
 }
 
 // Error implements the logger interface
@@ -188,7 +241,7 @@ func (l Logger) Error(v ...interface{}) {
 	if !l.logger.IsEnabledFor(gologging.ERROR) {
 		return
 	}
-	l.logger.Error(v...)
+	l.logger.Error(l.enrichMessage(v...)...)
 }
 
 // Critical implements the logger interface
@@ -196,7 +249,7 @@ func (l Logger) Critical(v ...interface{}) {
 	if !l.logger.IsEnabledFor(gologging.CRITICAL) {
 		return
 	}
-	l.logger.Critical(v...)
+	l.logger.Critical(l.enrichMessage(v...)...)
 }
 
 // Fatal implements the logger interface
@@ -237,6 +290,14 @@ func buildJsonPatternWithTags(tags map[string]string) string {
 		pattern += fmt.Sprintf(`, "%s": "%s"`, key, value)
 	}
 	pattern += `}`
+	return pattern
+}
+
+func buildTextPatternWithTags(tags map[string]string) string {
+	pattern := DefaultPattern + " "
+	for key, value := range tags {
+		pattern += fmt.Sprintf(`, "%s": "%s"`, key, value)
+	}
 	return pattern
 }
 
