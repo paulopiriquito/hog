@@ -10,7 +10,13 @@
         "level":  "DEBUG",
         "prefix": "[KRAKEND]",
         "syslog": false,
-        "stdout": true
+        "stdout": true,
+        "format": "json",
+        "tags": {
+          "env": "dev",
+          "service": "gateway",
+          "version": "v1.0.0"
+        }
       },
       "telemetry/metrics": {
         "collection_time": "60s",

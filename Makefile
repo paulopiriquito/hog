@@ -8,6 +8,7 @@ BIN_NAME := krakend
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 MODULE := github.com/paulopiriquito/hog
 VERSION := 2.12.0
+HOG_VERSION := 1.1.0
 SCHEMA_VERSION := $(shell echo "${VERSION}" | cut -d '.' -f 1,2)
 GIT_COMMIT := $(shell git rev-parse --short=7 HEAD)
 PKGNAME := hog
@@ -78,8 +79,10 @@ build: build-plugin cmd/krakend-ce/schema/schema.json
 	@echo "You can now use ./${BIN_NAME}"
 
 test: build
+	go test -v ./plugins/static-content
 	go test -v ./pkg/headers
 	go test -v ./pkg/paths
+	go test -v ./pkg/logging
 	go test -v ./tests
 
 cmd/krakend-ce/schema/schema.json:
@@ -88,22 +91,22 @@ cmd/krakend-ce/schema/schema.json:
 
 # Build KrakenD using docker (defaults to whatever the golang container uses)
 build_on_docker: docker-builder-linux
-	docker run --rm -it -v "${PWD}:/app" -w /app ghcr.io/paulopiriquito/hog/builder:${VERSION}-linux-generic sh -c "git config --global --add safe.directory /app && make -e build"
+	docker run --rm -it -v "${PWD}:/app" -w /app ghcr.io/paulopiriquito/hog/builder:${HOG_VERISION}-linux-generic sh -c "git config --global --add safe.directory /app && make -e build"
 
 # Build the container using the Dockerfile (alpine)
 docker:
-	docker build --no-cache --pull --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} -t ghcr.io/paulopiriquito/hog:${VERSION} .
+	docker build --no-cache --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} --build-arg KRAKEND_VERSION=${VERSION} -t ghcr.io/paulopiriquito/hog:${HOG_VERSION} .
 
 docker-builder:
-	docker build --no-cache --pull --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} -t ghcr.io/paulopiriquito/hog/builder:${VERSION} -f Dockerfile-builder .
+	docker build --no-cache --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} -t ghcr.io/paulopiriquito/hog/builder:${HOG_VERISION} -f Dockerfile-builder .
 
 docker-builder-linux:
-	docker build --no-cache --pull --build-arg GOLANG_VERSION=${GOLANG_VERSION} -t ghcr.io/paulopiriquito/hog/builder:${VERSION}-linux-generic -f Dockerfile-builder-linux .
+	docker build --no-cache --build-arg GOLANG_VERSION=${GOLANG_VERSION} -t ghcr.io/paulopiriquito/hog/builder:${HOG_VERISION}-linux-generic -f Dockerfile-builder-linux .
 
 benchmark:
 	@mkdir -p bench_res
 	@touch bench_res/${GIT_COMMIT}.out
-	@docker run --rm -d --name hog -v "${PWD}/tests/fixtures:/etc/krakend" -p 8080:8080 ghcr.io/paulopiriquito/hog:${VERSION} run -dc /etc/krakend/bench.json
+	@docker run --rm -d --name hog -v "${PWD}/tests/fixtures:/etc/krakend" -p 8080:8080 ghcr.io/paulopiriquito/hog:${HOG_VERISION} run -dc /etc/krakend/bench.json
 	@sleep 2
 	@docker run --rm -it --link hog peterevans/vegeta sh -c \
 		"echo 'GET http://krakend:8080/test' | vegeta attack -rate=0 -duration=30s -max-workers=300 | tee results.bin | vegeta report" > bench_res/${GIT_COMMIT}.out
@@ -113,7 +116,7 @@ benchmark:
 security_scan:
 	@mkdir -p sec_scan
 	@touch sec_scan/${GIT_COMMIT}.out
-	@docker run --rm -d --name hog -v "${PWD}/tests/fixtures:/etc/krakend" -p 8080:8080 ghcr.io/paulopiriquito/hog:${VERSION} run -dc /etc/krakend/bench.json
+	@docker run --rm -d --name hog -v "${PWD}/tests/fixtures:/etc/krakend" -p 8080:8080 ghcr.io/paulopiriquito/hog:${HOG_VERISION} run -dc /etc/krakend/bench.json
 	@docker run --rm -it --link hog instrumentisto/nmap --script vuln krakend > sec_scan/${GIT_COMMIT}.out
 	@docker stop hog
 	@cat sec_scan/${GIT_COMMIT}.out
