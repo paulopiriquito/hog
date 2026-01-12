@@ -1,0 +1,38 @@
+# Prometheus Configuration
+# Scrapes metrics from Alloy and KrakenD, receives remote write from Alloy/Tempo
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: local
+    env: dev
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Grafana Alloy metrics
+  - job_name: 'alloy'
+    static_configs:
+      - targets: ['alloy:12345']
+
+  # Tempo metrics
+  - job_name: 'tempo'
+    static_configs:
+      - targets: ['tempo:3200']
+
+  # Loki metrics
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: /metrics
+
+  # KrakenD/HOG gateway metrics (backup scrape, Alloy also scrapes this)
+  - job_name: 'krakend'
+    static_configs:
+      - targets: ['hog:8090']
+    metrics_path: /__stats

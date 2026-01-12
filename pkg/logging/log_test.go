@@ -148,7 +148,11 @@ func newExtraConfig(level, format, customFormat string) map[string]interface{} {
 			"stdout":        true,
 			"format":        format,
 			"custom_format": customFormat,
-			"tags":          map[string]string{"version": "v1.0.0", "service": "hog", "env": "test"},
+			"tags": map[string]interface{}{
+				"service": "hog",
+				"env":     "test",
+				"version": "1.0.0",
+			},
 		},
 	}
 }

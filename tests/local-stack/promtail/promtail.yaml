@@ -1,0 +1,54 @@
+# Promtail Configuration for HOG Local Stack
+# Reads logs from shared volume and ships to Loki
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # HOG Gateway logs
+  - job_name: hog-gateway
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: hog
+          service: hog-gateway
+          __path__: /var/log/hog/*.log
+    pipeline_stages:
+      # Parse JSON logs
+      - json:
+          expressions:
+            level: level
+            module: module
+            method: method
+            path: path
+            status: status
+            trace_id: trace_id
+            span_id: span_id
+            client_ip: client_ip
+            latency_ms: latency_ms
+            timestamp: timestamp
+      # Set labels from extracted fields
+      - labels:
+          level:
+          module:
+          method:
+          path:
+          status:
+          trace_id:
+          span_id:
+          client_ip:
+      # Use timestamp from log
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      # Output line as structured log
+      - output:
+          source: message

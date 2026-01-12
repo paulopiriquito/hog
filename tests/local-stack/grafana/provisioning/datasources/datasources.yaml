@@ -1,0 +1,80 @@
+# Grafana Datasource Provisioning
+# Pre-configures Tempo, Loki, and Prometheus with trace-to-logs correlation
+
+apiVersion: 1
+
+datasources:
+  # Prometheus - Metrics
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+
+  # Tempo - Traces
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: false
+    editable: true
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: true
+        query: '{service="$${__span.tags["service.name"]}"} | json | trace_id="$${__trace.traceId}"'
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-1h"
+        spanEndTimeShift: "1h"
+        tags:
+          - key: service.name
+            value: service
+        queries:
+          - name: "Request Rate"
+            query: 'sum(rate(traces_spanmetrics_calls_total{service="$${__tags.service}"}[5m]))'
+          - name: "Error Rate"
+            query: 'sum(rate(traces_spanmetrics_calls_total{service="$${__tags.service}", status_code="STATUS_CODE_ERROR"}[5m]))'
+          - name: "Latency (p95)"
+            query: 'histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{service="$${__tags.service}"}[5m])) by (le))'
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      lokiSearch:
+        datasourceUid: loki
+
+  # Loki - Logs
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+    editable: true
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"([a-f0-9]+)"'
+          url: "$${__value.raw}"
+          datasourceUid: tempo
+          matcherType: regex
+        - name: trace_id
+          matcherRegex: 'trace_id=([a-f0-9]+)'
+          url: "$${__value.raw}"
+          datasourceUid: tempo
+          matcherType: regex

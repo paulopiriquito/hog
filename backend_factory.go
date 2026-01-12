@@ -3,10 +3,12 @@ package hog
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	amqp "github.com/krakend/krakend-amqp/v2"
 	cel "github.com/krakend/krakend-cel/v2"
 	cb "github.com/krakend/krakend-circuitbreaker/v2/gobreaker/proxy"
+	gologging "github.com/krakend/krakend-gologging/v2"
 	httpcache "github.com/krakend/krakend-httpcache/v2"
 	lambda "github.com/krakend/krakend-lambda/v2"
 	lua "github.com/krakend/krakend-lua/v2/proxy"
@@ -22,6 +24,7 @@ import (
 	"github.com/luraproject/lura/v2/proxy"
 	"github.com/luraproject/lura/v2/transport/http/client"
 	httprequestexecutor "github.com/luraproject/lura/v2/transport/http/client/plugin"
+	"github.com/paulopiriquito/hog/pkg/headers"
 )
 
 // NewBackendFactory creates a BackendFactory by stacking all the available middlewares:
@@ -50,9 +53,23 @@ func newRequestExecutorFactory(logger logging.Logger) func(*config.Backend) clie
 		clientFactory = httpcache.NewHTTPClient(cfg, clientFactory)
 		clientFactory = otellura.InstrumentedHTTPClientFactory(clientFactory, cfg)
 		// TODO: check what happens if we have both, opencensus and otel enabled ?
-		return opencensus.HTTPRequestExecutorFromConfig(clientFactory, cfg)
+		baseExecutor := opencensus.HTTPRequestExecutorFromConfig(clientFactory, cfg)
+
+		// Wrap with trace header injection
+		return traceInjectingExecutor(baseExecutor)
 	}
 	return httprequestexecutor.HTTPRequestExecutor(logger, requestExecutorFactory)
+}
+
+// traceInjectingExecutor wraps an HTTP request executor to inject trace headers
+func traceInjectingExecutor(next client.HTTPRequestExecutor) client.HTTPRequestExecutor {
+	return func(ctx context.Context, req *http.Request) (*http.Response, error) {
+		// Get trace format from logging config
+		traceFormat := gologging.GetTraceFormat()
+		// Inject trace headers based on configured format
+		headers.InjectTraceHeaders(ctx, req, traceFormat)
+		return next(ctx, req)
+	}
 }
 
 func internalNewBackendFactory(ctx context.Context, requestExecutorFactory func(*config.Backend) client.HTTPRequestExecutor,

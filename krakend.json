@@ -5,6 +5,10 @@
     "port": 8080,
     "cache_ttl": "3600s",
     "timeout": "3s",
+    "plugin": {
+        "pattern":".so",
+        "folder": "/etc/krakend/plugins/"
+    },
     "extra_config": {
       "telemetry/logging": {
         "level":  "DEBUG",
@@ -12,6 +16,9 @@
         "syslog": false,
         "stdout": true,
         "format": "json",
+        "access_log": true,
+        "skip_paths": ["/__health", "/__debug"],
+        "trace_format": "otel",
         "tags": {
           "env": "dev",
           "service": "gateway",
@@ -37,8 +44,8 @@
             "name":["hog-static-content"],
             "hog-static-content": {
                 "static": [{
-                    "path-prefix": "/duckduckgo/*",
-                    "service-host": "https://duckduckgo.com"
+                    "path-prefix": "/static/*",
+                    "service-host": "http://localhost:3000"
                 }]
             }
         }
