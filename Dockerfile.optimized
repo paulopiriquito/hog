@@ -1,0 +1,70 @@
+ARG GOLANG_VERSION
+ARG ALPINE_VERSION
+
+FROM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} as builder
+
+RUN apk --no-cache add make gcc musl-dev binutils-gold git
+
+COPY . /app
+WORKDIR /app
+
+# Build plugins with optimized flags
+RUN cd plugins/static-content && \
+    go get . && \
+    go build -buildmode=plugin -ldflags="-s -w" -o hog-static-content.so .
+
+RUN cd plugins/authenticator && \
+    go get . && \
+    go build -buildmode=plugin -ldflags="-s -w" -o hog-authenticator.so .
+
+# Get the module and build krakend binary with optimized flags
+RUN go get . && \
+    go build -ldflags="-s -w -X github.com/paulopiriquito/hog/pkg.Version=2.12.0 -X github.com/luraproject/lura/v2/core.KrakendVersion=2.12.0" \
+    -o krakend ./cmd/krakend-ce
+
+# Run tests
+RUN go test -v ./plugins/static-content && \
+    go test -v ./plugins/authenticator && \
+    go test -v ./pkg/headers && \
+    go test -v ./pkg/paths && \
+    go test -v ./pkg/logging && \
+    go test -v ./tests
+
+# Strip binaries for additional size reduction
+RUN strip krakend plugins/static-content/hog-static-content.so plugins/authenticator/hog-authenticator.so
+
+# Compress only the main binary with UPX (plugins are already stripped and can't be compressed)
+RUN apk add --no-cache upx && \
+    upx --best --lzma krakend
+
+
+FROM alpine:${ALPINE_VERSION}
+ARG KRAKEND_VERSION
+
+LABEL core_maintainer="community@krakend.io"
+LABEL maintainer="paulo.piriquito@outlook.pt"
+LABEL krakend_version="${KRAKEND_VERSION}"
+
+# Minimal dependencies - only ca-certificates, no tzdata
+RUN apk upgrade --no-cache --no-interactive && \
+    apk add --no-cache ca-certificates && \
+    adduser -u 1000 -S -D -H krakend && \
+    mkdir -p /etc/krakend/plugins && \
+    echo '{ "version": 3 }' > /etc/krakend/krakend.json && \
+    rm -rf /var/cache/apk/* /tmp/* /var/tmp/*
+
+COPY --from=builder /app/krakend /usr/bin/krakend
+COPY --from=builder /app/plugins/static-content/hog-static-content.so /etc/krakend/plugins/
+COPY --from=builder /app/plugins/authenticator/hog-authenticator.so /etc/krakend/plugins/
+
+USER 1000
+
+WORKDIR /etc/krakend
+
+ENV USAGE_DISABLE=1
+ENV KRAKEND_PORT=8080
+
+ENTRYPOINT [ "/usr/bin/krakend" ]
+CMD [ "run", "-c", "/etc/krakend/krakend.json" ]
+
+EXPOSE 8000 8090

@@ -1,0 +1,8 @@
+"security/cors": {
+  "allow_origins": {{ marshal .service.cors_allow_origins }},
+  "allow_methods": {{ marshal .service.cors_allow_methods }},
+  "allow_headers": {{ marshal .service.cors_allow_headers }},
+  "expose_headers": {{ marshal .service.cors_expose_headers }},
+  "max_age": "{{ .service.cors_max_age }}",
+  "allow_credentials": {{ .service.cors_allow_credentials }}
+}

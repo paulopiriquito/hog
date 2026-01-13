@@ -1,0 +1,57 @@
+{
+  "service_name": "hog-gateway-nprod",
+  "service_version": "staging",
+  "port": 8080,
+  "cache_ttl": "1800s",
+  "timeout": "30s",
+
+  "log_level": "INFO",
+  "log_format": "json",
+  "log_stdout": true,
+  "log_syslog": false,
+  "access_log": true,
+  "skip_paths": ["/__health", "/api/v1/__health"],
+  "trace_format": "otel",
+  "log_tags": {
+    "env": "nprod",
+    "service": "hog-gateway",
+    "version": "staging"
+  },
+
+  "cors_allow_origins": ["https://staging.example.com"],
+  "cors_allow_methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  "cors_allow_headers": ["Origin", "Authorization", "Content-Type", "Accept", "X-Requested-With"],
+  "cors_expose_headers": ["Content-Length", "Content-Type"],
+  "cors_max_age": "12h",
+  "cors_allow_credentials": true,
+
+  "static_host": "http://webapp:3000",
+  "static_path_prefix": "/*",
+  "static_auth_required": false,
+
+  "use_oauth": false,
+  "idp_type": "oidc",
+  "idp_issuer": "https://idp.staging.example.com",
+  "idp_client_id": "hog-gateway",
+  "oauth_simple_auth_url": "/oauth/simple-auth",
+  "oauth_token_url": "/oauth/token",
+  "oauth_logout_url": "/oauth/logout",
+  "oauth_userinfo_url": "/oauth/userinfo",
+  "oauth_callback_url": "/oauth/callback",
+  "oauth_scopes": "openid profile email",
+  "session_cookie_name": "hog_session",
+
+  "otel_enabled": true,
+  "otel_service_name": "hog-gateway-nprod",
+  "otel_exporter_host": "otel-collector",
+  "otel_exporter_port": 4317,
+  "otel_exporter_use_http": false,
+  "otel_disable_metrics": false,
+  "otel_disable_traces": false,
+  "metrics_listen_address": ":8090",
+  "metrics_collection_time": "60s",
+
+  "backend_timeout": "30s",
+  "health_backend_host": "http://backend:8080",
+  "health_backend_path": "/__health"
+}
