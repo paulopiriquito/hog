@@ -41,9 +41,12 @@ func isSecureRequest(r *http.Request) bool {
 }
 
 // SetSessionCookie creates and sets an encrypted session cookie
-func SetSessionCookie(w http.ResponseWriter, r *http.Request, config CookieConfig, idToken string, sessionID string) error {
+func SetSessionCookie(
+	w http.ResponseWriter, r *http.Request, config CookieConfig, idToken string, accessToken string, sessionID string,
+) error {
 	sessionData := SessionData{
-		JWT:       idToken,
+		JWT:       accessToken,
+		Identity:  idToken,
 		SessionID: sessionID,
 	}
 
@@ -52,7 +55,7 @@ func SetSessionCookie(w http.ResponseWriter, r *http.Request, config CookieConfi
 		return err
 	}
 
-	maxAge := CalculateMaxAge(idToken)
+	maxAge := CalculateMaxAge(accessToken)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     GetCookieName(config.CookieName),

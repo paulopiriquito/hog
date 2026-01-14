@@ -509,14 +509,15 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	}
 
 	idToken := token["id_token"].(string)
+	accessToken := token["access_token"].(string)
 
 	// Extract sub from JWT for audit logging
 	sub := extractSubFromJWT(idToken)
-	sessionMaxAge := session.CalculateMaxAge(idToken)
+	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
 	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, sessionID); err != nil {
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -568,12 +569,14 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	}
 
 	idToken := token["id_token"].(string)
+	accessToken := token["access_token"].(string)
+
 	sub := extractSubFromJWT(idToken)
-	sessionMaxAge := session.CalculateMaxAge(idToken)
+	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
 	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, sessionID); err != nil {
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -639,7 +642,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sub := extractSubFromJWT(sessionData.JWT)
+	sub := extractSubFromJWT(sessionData.Identity)
 	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sub, sessionData.SessionID))
 
 	w.Header().Set("Content-Type", "application/json")
@@ -686,10 +689,11 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 	}
 
 	// Extract user claims from JWT
-	userClaims := session.ExtractUserClaimsFromJWT(sessionData.JWT)
+	userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
 
 	// Inject Authorization header
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
+	r.Header.Set("Identity", sessionData.Identity)
 
 	// Inject user identity headers
 	if userClaims.Sub != "" && userClaims.Sub != "unknown" {
