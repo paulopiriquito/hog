@@ -604,6 +604,7 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 	// Create encrypted session cookie
 	sessionData := session.SessionData{
 		JWT:       testJWT,
+		Identity:  testJWT,
 		SessionID: "session-123",
 	}
 	encryptedCookie, err := session.EncryptSessionCookie(sessionData, config.Config.SessionKey)
