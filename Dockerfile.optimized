@@ -20,7 +20,8 @@ RUN cd plugins/authenticator && \
 # Get the module and build krakend binary with optimized flags
 RUN go get . && \
     go build -ldflags="-s -w -X github.com/paulopiriquito/hog/pkg.Version=2.12.0 -X github.com/luraproject/lura/v2/core.KrakendVersion=2.12.0" \
-    -o krakend ./cmd/krakend-ce
+    -o krakend ./cmd/krakend-ce && \
+    rm -rf /go/pkg/mod
 
 # Run tests
 RUN go test -v ./plugins/static-content && \

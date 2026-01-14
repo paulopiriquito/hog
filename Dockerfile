@@ -5,8 +5,11 @@ FROM golang:${GOLANG_VERSION}-alpine${ALPINE_VERSION} as builder
 
 RUN apk --no-cache --virtual .build-deps add make gcc musl-dev binutils-gold git
 
-COPY . /app
+COPY go.mod go.sum /app/
 WORKDIR /app
+RUN go mod download
+
+COPY . /app
 
 # Build KrakenD binary
 RUN make all
