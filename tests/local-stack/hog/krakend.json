@@ -84,28 +84,28 @@
       },
         "plugin/http-server": {
             "name":["hog-authenticator", "hog-static-content"],
-            "hog-static-content": {
-                "static": [
-                    {
-                        "path-prefix": "/static/*",
-                        "service-host": "http://localhost:3000",
-                        "auth": false
-                    },
-                    {
-                        "path-prefix": "/protected-static/*",
-                        "service-host": "https://httpbin.org",
-                        "auth": true
-                    }
-                ],
-                "auth": {
-                    "simple-auth-url": "/oauth/simple-auth"
-                }
-            },
-            "hog-authenticator": {
-                "idp": {
-                    "type": "oidc"
-                }
+          "hog-static-content": {
+            "static": [
+              {
+                "path-prefix": "/static/*",
+                "service-host": "http://localhost:3000",
+                "auth": false
+              },
+              {
+                "path-prefix": "/protected-static/*",
+                "service-host": "https://httpbin.org",
+                "auth": true
+              }
+            ],
+            "auth": {
+              "simple-auth-url": "/oauth/simple-auth"
             }
+          },
+          "hog-authenticator": {
+            "idp": {
+              "type": "oidc"
+            }
+          }
         }
     },
     "endpoints": [

@@ -1,0 +1,25 @@
+{{/*
+  Static Content Plugin Configuration
+
+  Configures the hog-static-content plugin for serving static files
+  and proxying API requests to backend services.
+*/}}
+"hog-static-content": {
+  "static": [
+    {
+      "path-prefix": "{{ .service.static_path_prefix }}",
+      "service-host": "{{ .service.static_host }}",
+      "auth": {{ .service.static_auth_required }}
+    }
+  ],
+  "service-gateway": {
+    "path-prefix": {{ marshal .service.api_path_prefix }},
+  }
+  {{ if .service.use_oauth }}
+  ,"auth": {
+    "simple-auth-url": "{{ .service.oauth_simple_auth_url }}",
+    "session-cookie-name": "{{ .service.session_cookie_name }}",
+    "session-key": "{{ env "AUTH_COOKIE_KEY" }}"
+  }
+  {{ end }}
+}
