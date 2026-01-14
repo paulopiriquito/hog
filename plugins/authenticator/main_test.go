@@ -404,6 +404,16 @@ func TestGetCallbackURLPartialProxy(t *testing.T) {
 	assert.Equal(t, "https://krakend:8080/oauth/callback", url)
 }
 
+func TestGetCallbackURLProxyOrigin(t *testing.T) {
+	// Test with only Origin header (proxy origin scenario)
+	req := httptest.NewRequest(http.MethodGet, "/oauth/callback", nil)
+	req.Host = "krakend:8080"
+	req.Header.Set("Origin", "https://api.example.com")
+
+	url := getCallbackURL(req, "/oauth/callback")
+	assert.Equal(t, "https://api.example.com/oauth/callback", url)
+}
+
 func TestHandleCallbackMissingCode(t *testing.T) {
 	mockLog := &mockLogger{}
 	logger = mockLog

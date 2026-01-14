@@ -8,7 +8,7 @@ BIN_NAME := krakend
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 MODULE := github.com/paulopiriquito/hog
 VERSION := 2.12.0
-HOG_VERSION := 1.1.1
+HOG_VERSION := 1.1.2
 SCHEMA_VERSION := $(shell echo "${VERSION}" | cut -d '.' -f 1,2)
 GIT_COMMIT := $(shell git rev-parse --short=7 HEAD)
 PKGNAME := hog

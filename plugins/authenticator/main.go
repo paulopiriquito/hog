@@ -779,6 +779,12 @@ func sendJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 
 // Helper: Get callback URL
 func getCallbackURL(r *http.Request, callbackPath string) string {
+	// Check for Origin header (from reverse proxy/ingress)
+	origin := r.Header.Get("Origin")
+	if origin != "" {
+		return fmt.Sprintf("%s%s", origin, callbackPath)
+	}
+
 	// Check for X-Forwarded-Proto header (from reverse proxy/ingress)
 	scheme := r.Header.Get("X-Forwarded-Proto")
 	if scheme == "" {
