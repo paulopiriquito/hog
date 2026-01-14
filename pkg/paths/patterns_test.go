@@ -55,8 +55,10 @@ func TestMatchesWildcard(t *testing.T) {
 		{"dash in path", "/api/user-123", "/api/*", true},
 		{"underscore in path", "/api/user_123", "/api/*", true},
 		{"dot in path", "/api/file.txt", "/api/*", true},
-		{"contains invalid character in path", "/api/file.txt?", "/api/*", false},
-		{"contains invalid character in pattern", "/api/user", "/api/*?", false},
+		{"query parameter in path", "/api/file.txt?name=value", "/api/*", true},
+		{"hash fragment in path", "/app#/route", "/app*", true},
+		{"query with ampersand", "/api/search?q=test&limit=10", "/api/*", true},
+		{"special chars in query", "/api/data?key=a+b&x[]=1", "/api/*", true},
 
 		// Greedy wildcard behavior
 		{"wildcard is greedy", "/api/v1/v2/users", "/api/*/users", true},

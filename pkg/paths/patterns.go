@@ -75,11 +75,47 @@ func normalizeTrailingSlash(s string) string {
 }
 
 // isValidPathChar returns true if the character is allowed in paths
+// Supports characters commonly found in:
+// - URL paths and query parameters (?&=)
+// - SPA routing with hash fragments (#)
+// - Modern filenames and URIs
+// - URL-encoded characters (%)
 func isValidPathChar(ch rune) bool {
-	return (ch >= 'a' && ch <= 'z') ||
-		(ch >= 'A' && ch <= 'Z') ||
-		(ch >= '0' && ch <= '9') ||
-		ch == '/' || ch == '-' || ch == '_' || ch == '.' || ch == '%'
+	// Alphanumeric characters
+	if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') {
+		return true
+	}
+
+	// Common path separators and basic characters
+	// / - path separator
+	// - _ . ~ common in filenames (unreserved in RFC 3986)
+	// % for URL encoding
+	if ch == '/' || ch == '-' || ch == '_' || ch == '.' || ch == '~' || ch == '%' {
+		return true
+	}
+
+	// Query string and fragment characters
+	// ? & = for query parameters
+	// # for hash fragments (SPA routing)
+	if ch == '?' || ch == '&' || ch == '=' || ch == '#' {
+		return true
+	}
+
+	// Sub-delimiters per RFC 3986 (commonly used in paths and queries)
+	// ! $ ' ( ) * + , ; :
+	// Also includes @ for email-like patterns and [ ] for special cases
+	if ch == '!' || ch == '$' || ch == '\'' || ch == '(' || ch == ')' ||
+		ch == '+' || ch == ',' || ch == ';' || ch == ':' || ch == '@' ||
+		ch == '[' || ch == ']' {
+		return true
+	}
+
+	// Space (common in query parameters, though usually encoded)
+	if ch == ' ' {
+		return true
+	}
+
+	return false
 }
 
 // isValidPatternChar returns true if the character is allowed in patterns
