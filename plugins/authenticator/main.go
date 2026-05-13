@@ -607,46 +607,11 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	logger.Debug(fmt.Sprintf("Userinfo request session_id=%s", sessionData.SessionID))
 
-	// Call IdP's userinfo endpoint
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, oidcConfig.UserinfoEndpoint, nil)
+	rawBody, _, err := fetchUserInfoRaw(r.Context(), sessionData.JWT)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to create userinfo request: %v", err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	req.Header.Set("Authorization", "Bearer "+sessionData.JWT)
-
-	// Inject trace headers for distributed tracing
-	traceFormat := os.Getenv("TRACE_FORMAT")
-	if traceFormat == "" {
-		traceFormat = headers.TraceFormatOTEL
-	}
-	headers.InjectTraceHeaders(r.Context(), req, traceFormat)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to fetch userinfo: %v", err))
-		http.Error(w, "Failed to fetch user info", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Warning(fmt.Sprintf("Userinfo endpoint returned status %d, clearing session cookie session_id=%s", resp.StatusCode, sessionData.SessionID))
-
-		// Clear the invalid session cookie
+		logger.Warning(fmt.Sprintf("Userinfo fetch failed session_id=%s error=%v", sessionData.SessionID, err))
 		session.ClearSessionCookie(w, r, config.Config.SessionCookieName)
-
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to read userinfo response: %v", err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -655,7 +620,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+	w.Write(rawBody)
 }
 
 // Handler: Logout
