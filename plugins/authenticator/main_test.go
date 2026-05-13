@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -952,4 +953,90 @@ func makeTestJWT(t *testing.T, sub string) string {
 	payloadJSON := fmt.Sprintf(`{"sub":%q,"exp":%d}`, sub, time.Now().Add(time.Hour).Unix())
 	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
 	return header + "." + payload + ".sig"
+}
+
+func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.T) {
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc","email":"a@b.com","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
+				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+			}},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, Identity: jwt, SessionID: "sid",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	mapped, ok := body["mapped"].(map[string]any)
+	require.True(t, ok, "expected mapped field")
+	assert.Equal(t, "abc", mapped["X-User-Id"])
+	roles, ok := mapped["X-User-Roles"].([]any)
+	require.True(t, ok)
+	require.Len(t, roles, 1)
+	assert.Equal(t, "KRONOS-USER", roles[0])
+
+	// Cookie refreshed
+	var refreshed string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			refreshed = c.Value
+		}
+	}
+	require.NotEmpty(t, refreshed)
+	data, err := session.DecryptSessionCookie(refreshed, key)
+	require.NoError(t, err)
+	assert.Equal(t, "KRONOS-USER", data.Headers["X-User-Roles"])
+}
+
+func TestHandleUserInfo_WithoutForwardConfig_PassesThrough(t *testing.T) {
+	idpBody := `{"sub":"abc","email":"a@b.com"}`
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(idpBody))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, Identity: jwt, SessionID: "sid"}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	assert.JSONEq(t, idpBody, string(body))
 }

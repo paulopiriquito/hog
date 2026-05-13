@@ -627,7 +627,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	logger.Debug(fmt.Sprintf("Userinfo request session_id=%s", sessionData.SessionID))
 
-	rawBody, _, err := fetchUserInfoRaw(r.Context(), sessionData.JWT)
+	rawBody, parsed, err := fetchUserInfoRaw(r.Context(), sessionData.JWT)
 	if err != nil {
 		logger.Warning(fmt.Sprintf("Userinfo fetch failed session_id=%s error=%v", sessionData.SessionID, err))
 		session.ClearSessionCookie(w, r, config.Config.SessionCookieName)
@@ -638,9 +638,50 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	sub := extractSubFromJWT(sessionData.Identity)
 	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sub, sessionData.SessionID))
 
+	// Pass-through mode when forward is not configured.
+	if len(config.Forward.Headers) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(rawBody)
+		return
+	}
+
+	// Forward mode: enrich response, refresh cookie Headers.
+	if parsed == nil {
+		// Body was not JSON — cannot enrich. Pass through.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(rawBody)
+		return
+	}
+
+	res := forward.Apply(parsed, config.Forward)
+	emitForwardDiagnostics(res.Diagnostics, sessionData.SessionID)
+
+	// Refresh cookie with new Headers.
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
+		JWT:       sessionData.JWT,
+		Identity:  sessionData.Identity,
+		SessionID: sessionData.SessionID,
+		Headers:   res.Headers,
+	}); err != nil {
+		logger.Error(fmt.Sprintf("Failed to refresh session cookie: %v", err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Enriched response: raw IdP fields + mapped object.
+	enriched := make(map[string]any, len(parsed)+1)
+	for k, v := range parsed {
+		enriched[k] = v
+	}
+	enriched["mapped"] = res.Mapped
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(rawBody)
+	if err := json.NewEncoder(w).Encode(enriched); err != nil {
+		logger.Error(fmt.Sprintf("Failed to encode enriched userinfo: %v", err))
+	}
 }
 
 // Handler: Logout
