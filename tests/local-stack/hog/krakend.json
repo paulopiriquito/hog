@@ -116,6 +116,7 @@
                 {
                   "claim":  "groups",
                   "header": "X-User-Roles",
+                  "as":     "roles",
                   "mapping": [
                     { "from": "cn=PT-LM-ROLE-KRONOS-USER,",                    "to": "KRONOS-USER" },
                     { "from": "cn=PT-LM-ROLE-invoice-portal-search_invoices,", "to": "INVOICE-SEARCH" },
