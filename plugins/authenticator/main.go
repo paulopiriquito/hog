@@ -710,11 +710,9 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
-		// No session cookie, pass through to next handler
 		next.ServeHTTP(w, r)
 		return
 	}
-
 	sessionData, err := session.DecryptSessionCookie(cookie.Value, config.Config.SessionKey)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Cookie decryption failed: %v", err))
@@ -722,25 +720,32 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Extract user claims from JWT
-	userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
-
-	// Inject Authorization header
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
 	r.Header.Set("Identity", sessionData.Identity)
 
-	// Inject user identity headers
-	if userClaims.Sub != "" && userClaims.Sub != "unknown" {
-		r.Header.Set("X-User-Id", userClaims.Sub)
-	}
-	if userClaims.Email != "" {
-		r.Header.Set("X-User-Email", userClaims.Email)
-	}
-	if userClaims.Name != "" {
-		r.Header.Set("X-User-Name", userClaims.Name)
+	if len(config.Forward.Headers) > 0 {
+		// Allowlist mode: emit configured headers from session.
+		for name, value := range sessionData.Headers {
+			r.Header.Set(name, value)
+		}
+		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
+			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
+	} else {
+		// Legacy mode: identity headers from id_token JWT.
+		userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
+		if userClaims.Sub != "" && userClaims.Sub != "unknown" {
+			r.Header.Set("X-User-Id", userClaims.Sub)
+		}
+		if userClaims.Email != "" {
+			r.Header.Set("X-User-Email", userClaims.Email)
+		}
+		if userClaims.Name != "" {
+			r.Header.Set("X-User-Name", userClaims.Name)
+		}
+		logger.Debug(fmt.Sprintf("Injected legacy identity headers session_id=%s path=%s",
+			sessionData.SessionID, r.URL.Path))
 	}
 
-	logger.Debug(fmt.Sprintf("Injected auth headers for session_id=%s path=%s", sessionData.SessionID, r.URL.Path))
 	next.ServeHTTP(w, r)
 }
 

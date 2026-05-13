@@ -648,7 +648,7 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 	assert.Equal(t, "user-123", capturedUserId)
 	assert.Equal(t, "user@example.com", capturedUserEmail)
 	assert.Equal(t, "Test User", capturedUserName)
-	assert.Contains(t, mockLog.debugLogs[0], "Injected auth headers for session_id=")
+	assert.Contains(t, mockLog.debugLogs[0], "Injected legacy identity headers session_id=")
 }
 
 func TestInjectAuthorizationHeaderNoCookie(t *testing.T) {
@@ -951,6 +951,90 @@ func makeTestJWT(t *testing.T, sub string) string {
 	t.Helper()
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payloadJSON := fmt.Sprintf(`{"sub":%q,"exp":%d}`, sub, time.Now().Add(time.Hour).Unix())
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	return header + "." + payload + ".sig"
+}
+
+func TestInjectAuthorizationHeader_LegacyMode_SetsXUserHeaders(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWTWithClaims(t, `{"sub":"abc","email":"a@b.com","name":"A B","exp":`+
+		fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())+`}`)
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, Identity: jwt}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", capturedHeaders.Get("X-User-Id"))
+	assert.Equal(t, "a@b.com", capturedHeaders.Get("X-User-Email"))
+	assert.Equal(t, "A B", capturedHeaders.Get("X-User-Name"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Roles"))
+}
+
+func TestInjectAuthorizationHeader_ForwardMode_EmitsConfiguredHeadersOnly(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, Identity: jwt,
+		Headers: map[string]string{
+			"X-User-Id":    "abc",
+			"X-User-Roles": "KRONOS-USER,GITHUB-MEMBER",
+		},
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles"},
+		}},
+	}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", capturedHeaders.Get("X-User-Id"))
+	assert.Equal(t, "KRONOS-USER,GITHUB-MEMBER", capturedHeaders.Get("X-User-Roles"))
+	// Legacy ones not auto-emitted in forward mode (unless declared & set):
+	assert.Empty(t, capturedHeaders.Get("X-User-Email"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Name"))
+}
+
+func TestInjectAuthorizationHeader_NoCookie_NoHeadersSet(t *testing.T) {
+	cfg := PluginConfig{Config: Config{SessionKey: "12345678901234567890123456789012", SessionCookieName: "auth_session"}}
+	req := httptest.NewRequest("GET", "/anything", nil)
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, capturedHeaders.Get("Authorization"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Id"))
+}
+
+// makeTestJWTWithClaims builds an unsigned JWT whose payload is the literal JSON given.
+func makeTestJWTWithClaims(t *testing.T, payloadJSON string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
 	return header + "." + payload + ".sig"
 }
