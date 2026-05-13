@@ -22,3 +22,9 @@ staticPasswords:
     hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
     username: "test"
     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    groups:
+      - "cn=PT-LM-ROLE-KRONOS-USER,ou=KRONOS,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com"
+      - "cn=PT-LM-ROLE-invoice-portal-search_invoices,ou=invoice-portal,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com"
+      - "cn=GLOBAL-ROLE-GITHUB-CanJoin,ou=GITHUB,ou=applicationRole,ou=role,ou=GLOBAL,O=CORP.EXAMPLE.COM"
+      - "cn=PT-LM-SEDE,ou=people,ou=PT-LM,o=corp.example.com"
+      - "cn=LMPT-TODOS,ou=mailGroup,ou=MirapointMessagingSystem,ou=PT-LM,o=corp.example.com"
