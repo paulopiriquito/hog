@@ -132,8 +132,10 @@ func stringifyArrayItem(v any) string {
 	}
 }
 
-// formatFloat renders a float64 without scientific notation, dropping the
-// decimal point when the value is a whole number (e.g. 14947156 → "14947156").
+// formatFloat returns a stringified float. Integer-valued floats are formatted
+// without a decimal point ("14947156" rather than the default "%v" output of
+// "1.4947156e+07"). NaN and Inf cannot satisfy f == float64(int64(f)) so they
+// fall through to FormatFloat, which produces "NaN", "+Inf", or "-Inf".
 func formatFloat(f float64) string {
 	if f == float64(int64(f)) {
 		return strconv.FormatInt(int64(f), 10)

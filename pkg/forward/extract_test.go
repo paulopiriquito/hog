@@ -218,3 +218,16 @@ func TestApply_TruncatesLongSampleValues(t *testing.T) {
 		t.Errorf("sample not truncated: len=%d", len(got))
 	}
 }
+
+func TestApply_FractionalFloatStringifiesWithoutScientificNotation(t *testing.T) {
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "ratio", Name: "X-Ratio"},
+	}}
+	userinfo := map[string]any{"ratio": 3.14159}
+
+	res := forward.Apply(userinfo, cfg)
+
+	if got := res.Headers["X-Ratio"]; got != "3.14159" {
+		t.Errorf("got %q, want %q", got, "3.14159")
+	}
+}
