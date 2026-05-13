@@ -12,10 +12,10 @@ require (
 )
 
 require (
-	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
 	go.opentelemetry.io/otel v1.34.0 // indirect
 	go.opentelemetry.io/otel/metric v1.34.0 // indirect
@@ -24,6 +24,7 @@ require (
 )
 
 replace (
+	github.com/paulopiriquito/hog/pkg/forward => ../../pkg/forward
 	github.com/paulopiriquito/hog/pkg/headers => ../../pkg/headers
 	github.com/paulopiriquito/hog/pkg/pluginlogger => ../../pkg/pluginlogger
 	github.com/paulopiriquito/hog/pkg/session => ../../pkg/session

@@ -2,15 +2,14 @@ go 1.25.3
 
 use (
 	.
-	plugins/static-content
-	plugins/authenticator
+	pkg/forward
 	pkg/headers
-	pkg/paths
 	pkg/logging
-	pkg/session
+	pkg/paths
 	pkg/pluginlogger
+	pkg/session
+	plugins/authenticator
+	plugins/static-content
 )
 
-replace (
-	github.com/krakend/krakend-gologging/v2 v2.1.1 => ./pkg/logging
-)
+replace github.com/krakend/krakend-gologging/v2 v2.1.1 => ./pkg/logging
