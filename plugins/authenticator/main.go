@@ -517,7 +517,11 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
 	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
+		JWT:       accessToken,
+		Identity:  idToken,
+		SessionID: sessionID,
+	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -576,7 +580,11 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
 	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
+		JWT:       accessToken,
+		Identity:  idToken,
+		SessionID: sessionID,
+	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
