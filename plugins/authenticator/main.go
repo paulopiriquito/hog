@@ -524,11 +524,17 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
+	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	if fwdErr != nil {
+		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
+	}
+
 	// Encrypt and set cookie
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       accessToken,
 		Identity:  idToken,
 		SessionID: sessionID,
+		Headers:   fwdHeaders,
 	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -587,11 +593,17 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
 
+	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	if fwdErr != nil {
+		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
+	}
+
 	// Encrypt and set cookie
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       accessToken,
 		Identity:  idToken,
 		SessionID: sessionID,
+		Headers:   fwdHeaders,
 	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -741,6 +753,38 @@ func exchangeCodeForToken(ctx context.Context, config PluginConfig, code, verifi
 func extractSubFromJWT(jwt string) string {
 	claims := session.ExtractUserClaimsFromJWT(jwt)
 	return claims.Sub
+}
+
+// computeForwardHeaders fetches userinfo from the IdP and applies the forward
+// config. Returns the wire headers map (suitable for storing in the session
+// cookie) and a non-nil Result for callers that need the mapped view. On any
+// failure, returns nil headers and the error — callers decide whether to
+// continue without forwarding.
+func computeForwardHeaders(ctx context.Context, accessToken, sessionID string, cfg forward.Config) (map[string]string, forward.Result, error) {
+	if len(cfg.Headers) == 0 {
+		return nil, forward.Result{}, nil
+	}
+	userinfo, err := fetchUserInfo(ctx, accessToken)
+	if err != nil {
+		return nil, forward.Result{}, err
+	}
+	res := forward.Apply(userinfo, cfg)
+	emitForwardDiagnostics(res.Diagnostics, sessionID)
+	logger.Info(fmt.Sprintf("forward.headers extracted session_id=%s headers_emitted=%d", sessionID, len(res.Headers)))
+	return res.Headers, res, nil
+}
+
+func emitForwardDiagnostics(diags []forward.Diagnostic, sessionID string) {
+	for _, d := range diags {
+		switch d.Reason {
+		case "missing_claim":
+			logger.Debug(fmt.Sprintf("forward.header skipped reason=missing_claim claim=%s header=%s session_id=%s", d.Claim, d.Header, sessionID))
+		case "wrong_type":
+			logger.Warning(fmt.Sprintf("forward.header skipped reason=wrong_type claim=%s header=%s session_id=%s", d.Claim, d.Header, sessionID))
+		case "no_matches":
+			logger.Info(fmt.Sprintf("forward.header skipped reason=no_matches claim=%s header=%s samples=%v session_id=%s", d.Claim, d.Header, d.Samples, sessionID))
+		}
+	}
 }
 
 // Helper: Get cookie config from plugin config

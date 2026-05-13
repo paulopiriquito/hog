@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/paulopiriquito/hog/pkg/forward"
 	"github.com/paulopiriquito/hog/pkg/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -881,4 +882,74 @@ func TestLoadPluginConfig_WithoutForwardBlock_LeavesEmpty(t *testing.T) {
 	pc, err := loadPluginConfig(cfg)
 	require.NoError(t, err)
 	assert.Len(t, pc.Forward.Headers, 0)
+}
+
+func TestHandleCallback_WithForwardConfig_PopulatesHeaders(t *testing.T) {
+	mockUserinfoJSON := `{"sub":"abc","email":"a@b.com","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`
+
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			jwt := makeTestJWT(t, "abc")
+			fmt.Fprintf(w, `{"id_token":%q,"access_token":%q}`, jwt, jwt)
+		case "/userinfo":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserinfoJSON))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockIdP.Close()
+
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{
+		TokenEndpoint:    mockIdP.URL + "/token",
+		UserinfoEndpoint: mockIdP.URL + "/userinfo",
+	}
+
+	cfg := PluginConfig{
+		Idp:    Idp{ClientId: "c", ClientSecret: "s"},
+		Config: Config{SessionKey: "12345678901234567890123456789012", CallbackUrl: "/cb", SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
+				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+			}},
+		}},
+	}
+
+	state, err := createStatelessStateWithRedirect("verifier", "", cfg.Config.SessionKey)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/cb?code=x&state="+state, nil)
+	w := httptest.NewRecorder()
+	handleCallback(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var encryptedValue string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			encryptedValue = c.Value
+			break
+		}
+	}
+	require.NotEmpty(t, encryptedValue, "expected session cookie set")
+	data, err := session.DecryptSessionCookie(encryptedValue, cfg.Config.SessionKey)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Headers["X-User-Id"])
+	assert.Equal(t, "KRONOS-USER", data.Headers["X-User-Roles"])
+}
+
+// makeTestJWT produces an unsigned JWT with a far-future exp claim.
+func makeTestJWT(t *testing.T, sub string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payloadJSON := fmt.Sprintf(`{"sub":%q,"exp":%d}`, sub, time.Now().Add(time.Hour).Unix())
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	return header + "." + payload + ".sig"
 }
