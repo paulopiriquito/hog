@@ -12,9 +12,10 @@ import (
 
 // Data represents the decrypted session cookie content
 type Data struct {
-	JWT       string `json:"jwt"`
-	Identity  string `json:"identity"`
-	SessionID string `json:"session_id"`
+	JWT       string            `json:"jwt"`
+	Identity  string            `json:"identity"`
+	SessionID string            `json:"session_id"`
+	Headers   map[string]string `json:"headers,omitempty"`
 }
 
 // SessionData is an alias for Data for backwards compatibility
