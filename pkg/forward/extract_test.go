@@ -1,6 +1,9 @@
 package forward_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -229,5 +232,61 @@ func TestApply_FractionalFloatStringifiesWithoutScientificNotation(t *testing.T)
 
 	if got := res.Headers["X-Ratio"]; got != "3.14159" {
 		t.Errorf("got %q, want %q", got, "3.14159")
+	}
+}
+
+func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "userinfo_ldap.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var userinfo map[string]any
+	if err := json.Unmarshal(raw, &userinfo); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "sub", Name: "X-User-Id"},
+		{Claim: "email", Name: "X-User-Email"},
+		{Claim: "cn", Name: "X-User-Name"},
+		{Claim: "employeeNumber", Name: "X-User-EmployeeNumber"},
+		{Claim: "privmaindepartmentcode", Name: "X-User-Department"},
+		{
+			Claim: "memberof",
+			Name:  "X-User-Roles",
+			Mapping: []forward.Rule{
+				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+				{From: "cn=PT-LM-ROLE-invoice-portal-search_invoices,", To: "INVOICE-SEARCH"},
+				{From: "cn=PT-LM-ROLE-invoice-portal-invoice_download,", To: "INVOICE-DOWNLOAD"},
+				{From: "cn=GLOBAL-ROLE-GITHUB-CanJoin,", To: "GITHUB-MEMBER"},
+			},
+		},
+	}}
+
+	res := forward.Apply(userinfo, cfg)
+
+	wantHeaders := map[string]string{
+		"X-User-Id":             "12345678",
+		"X-User-Email":          "user@example.com",
+		"X-User-Name":           "TEST USER",
+		"X-User-EmployeeNumber": "99999999",
+		"X-User-Department":     "320",
+		"X-User-Roles":          "INVOICE-SEARCH,INVOICE-DOWNLOAD,GITHUB-MEMBER,KRONOS-USER",
+	}
+	if !reflect.DeepEqual(res.Headers, wantHeaders) {
+		t.Errorf("headers mismatch:\ngot:  %v\nwant: %v", res.Headers, wantHeaders)
+	}
+
+	mappedRoles, ok := res.Mapped["X-User-Roles"].([]string)
+	if !ok {
+		t.Fatalf("mapped roles not []string: %T", res.Mapped["X-User-Roles"])
+	}
+	wantRoles := []string{"INVOICE-SEARCH", "INVOICE-DOWNLOAD", "GITHUB-MEMBER", "KRONOS-USER"}
+	if !reflect.DeepEqual(mappedRoles, wantRoles) {
+		t.Errorf("mapped roles: got %v, want %v", mappedRoles, wantRoles)
+	}
+
+	if got := res.Mapped["X-User-Department"]; got != "320" {
+		t.Errorf("X-User-Department mapped: got %v, want \"320\"", got)
 	}
 }

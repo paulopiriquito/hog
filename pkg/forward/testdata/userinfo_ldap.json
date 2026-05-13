@@ -1,0 +1,30 @@
+{
+  "sub": "12345678",
+  "mail": "user@example.com",
+  "email": "user@example.com",
+  "uid": "12345678",
+  "employeeNumber": "99999999",
+  "cn": "TEST USER",
+  "given_name": "TEST",
+  "family_name": "USER",
+  "name": "TEST USER",
+  "preferredlanguage": "pt",
+  "ou": "PT-LM",
+  "co": "PORTUGAL",
+  "o": "LEROY MERLIN",
+  "privmaindepartmentnumber": "IT E DIGITAL",
+  "privmaindepartmentcode": "320",
+  "privDepartmentCode": ["320", "9016"],
+  "memberof": [
+    "cn=PT-LM-ALL,ou=private_groups,ou=PT-LM,o=corp.example.com",
+    "cn=PT-LM-SEDE,ou=people,ou=PT-LM,o=corp.example.com",
+    "cn=PT-LM-ROLE-STEP-CONSULT,ou=STEP,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com",
+    "cn=PT-LM-IT E DIGITAL,ou=people,ou=PT-LM,o=corp.example.com",
+    "cn=LMPT-SEDE-TODOS,ou=mailGroup,ou=MirapointMessagingSystem,ou=PT-LM,o=corp.example.com",
+    "cn=PT-LM-ROLE-invoice-portal-search_invoices,ou=invoice-portal,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com",
+    "cn=PT-LM-ROLE-invoice-portal-invoice_download,ou=invoice-portal,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com",
+    "cn=GLOBAL-ROLE-GITHUB-CanJoin,ou=GITHUB,ou=applicationRole,ou=role,ou=GLOBAL,O=CORP.EXAMPLE.COM",
+    "cn=PT-LM-ROLE-KRONOS-USER,ou=KRONOS,ou=applicationRole,ou=role,ou=PT-LM,o=corp.example.com"
+  ],
+  "departmentnumber": ["IT E DIGITAL"]
+}
