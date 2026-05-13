@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
+	"github.com/paulopiriquito/hog/pkg/forward"
 	"github.com/paulopiriquito/hog/pkg/headers"
 	"github.com/paulopiriquito/hog/pkg/pluginlogger"
 	"github.com/paulopiriquito/hog/pkg/session"
@@ -164,8 +165,9 @@ func (r registerer) registerHandlers(ctx context.Context, extra map[string]inter
 }
 
 type PluginConfig struct {
-	Idp    Idp    `mapstructure:"idp"`
-	Config Config `mapstructure:"config"`
+	Idp     Idp            `mapstructure:"idp"`
+	Config  Config         `mapstructure:"config"`
+	Forward forward.Config `mapstructure:"forward"`
 }
 
 type Idp struct {
@@ -255,6 +257,12 @@ func loadPluginConfig(cfg map[string]interface{}) (PluginConfig, error) {
 		pc.Config.SessionKey = randomKey
 		os.Setenv("AUTH_COOKIE_KEY", randomKey)
 		logger.Warning("No session key configured, generated random key and set AUTH_COOKIE_KEY environment variable")
+	}
+
+	if len(pc.Forward.Headers) > 0 {
+		if err := pc.Forward.Validate(); err != nil {
+			return pc, fmt.Errorf("invalid forward config: %w", err)
+		}
 	}
 
 	return pc, nil

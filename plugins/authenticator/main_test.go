@@ -823,3 +823,62 @@ func TestVerifyStatelessStateExpired(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "state expired")
 }
+
+func TestLoadPluginConfig_WithValidForwardBlock(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{
+				"issuer":        "http://localhost",
+				"client-id":     "x",
+				"client-secret": "y",
+			},
+			"forward": map[string]interface{}{
+				"headers": []interface{}{
+					map[string]interface{}{"claim": "sub", "header": "X-User-Id"},
+					map[string]interface{}{
+						"claim":  "memberof",
+						"header": "X-User-Roles",
+						"mapping": []interface{}{
+							map[string]interface{}{"from": "cn=A,", "to": "A"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pc, err := loadPluginConfig(cfg)
+	require.NoError(t, err)
+	require.Len(t, pc.Forward.Headers, 2)
+	assert.Equal(t, "X-User-Id", pc.Forward.Headers[0].Name)
+	assert.Equal(t, "memberof", pc.Forward.Headers[1].Claim)
+	require.Len(t, pc.Forward.Headers[1].Mapping, 1)
+	assert.Equal(t, "A", pc.Forward.Headers[1].Mapping[0].To)
+}
+
+func TestLoadPluginConfig_RejectsInvalidForwardBlock(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{"issuer": "http://localhost", "client-id": "x", "client-secret": "y"},
+			"forward": map[string]interface{}{
+				"headers": []interface{}{
+					map[string]interface{}{"claim": "sub"}, // missing header
+				},
+			},
+		},
+	}
+	_, err := loadPluginConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid forward config")
+}
+
+func TestLoadPluginConfig_WithoutForwardBlock_LeavesEmpty(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{"issuer": "http://localhost", "client-id": "x", "client-secret": "y"},
+		},
+	}
+	pc, err := loadPluginConfig(cfg)
+	require.NoError(t, err)
+	assert.Len(t, pc.Forward.Headers, 0)
+}
