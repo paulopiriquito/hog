@@ -11,9 +11,14 @@ type Config struct {
 }
 
 // Header declares one userinfo-claim → HTTP-header mapping.
+//
+// Mapping may be nil to mean "no rename rules, pass values through". An
+// explicitly empty non-nil slice (e.g. []Rule{}) is treated as a config
+// error and Validate rejects it. JSON/mapstructure unmarshalling produces
+// nil for an absent field, which is the well-formed case.
 type Header struct {
-	Claim   string `mapstructure:"claim" json:"claim"`
-	Header  string `mapstructure:"header" json:"header"`
+	Claim   string `mapstructure:"claim"             json:"claim"`
+	Name    string `mapstructure:"header"            json:"header"`
 	Mapping []Rule `mapstructure:"mapping,omitempty" json:"mapping,omitempty"`
 }
 
@@ -33,13 +38,13 @@ func (c Config) Validate() error {
 		if h.Claim == "" {
 			return fmt.Errorf("forward.headers[%d]: claim is required", i)
 		}
-		if h.Header == "" {
+		if h.Name == "" {
 			return fmt.Errorf("forward.headers[%d]: header is required", i)
 		}
-		if seen[h.Header] {
-			return fmt.Errorf("forward.headers[%d]: duplicate header %q", i, h.Header)
+		if seen[h.Name] {
+			return fmt.Errorf("forward.headers[%d]: duplicate header %q", i, h.Name)
 		}
-		seen[h.Header] = true
+		seen[h.Name] = true
 		if h.Mapping != nil {
 			if len(h.Mapping) == 0 {
 				return fmt.Errorf("forward.headers[%d]: mapping is present but empty", i)

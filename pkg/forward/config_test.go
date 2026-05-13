@@ -10,7 +10,7 @@ import (
 func TestConfigValidate_AcceptsMinimalValid(t *testing.T) {
 	cfg := forward.Config{
 		Headers: []forward.Header{
-			{Claim: "sub", Header: "X-User-Id"},
+			{Claim: "sub", Name: "X-User-Id"},
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -23,7 +23,7 @@ func TestConfigValidate_AcceptsMappingRules(t *testing.T) {
 		Headers: []forward.Header{
 			{
 				Claim:  "memberof",
-				Header: "X-User-Roles",
+				Name:   "X-User-Roles",
 				Mapping: []forward.Rule{
 					{From: "cn=KRONOS,", To: "KRONOS-USER"},
 				},
@@ -44,7 +44,7 @@ func TestConfigValidate_RejectsEmptyHeaders(t *testing.T) {
 }
 
 func TestConfigValidate_RejectsMissingClaim(t *testing.T) {
-	cfg := forward.Config{Headers: []forward.Header{{Header: "X-Foo"}}}
+	cfg := forward.Config{Headers: []forward.Header{{Name: "X-Foo"}}}
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "claim is required") {
 		t.Fatalf("expected missing-claim error, got: %v", err)
@@ -61,8 +61,8 @@ func TestConfigValidate_RejectsMissingHeader(t *testing.T) {
 
 func TestConfigValidate_RejectsDuplicateHeaderName(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
-		{Claim: "sub", Header: "X-User-Id"},
-		{Claim: "uid", Header: "X-User-Id"},
+		{Claim: "sub", Name: "X-User-Id"},
+		{Claim: "uid", Name: "X-User-Id"},
 	}}
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "duplicate header") {
@@ -72,7 +72,7 @@ func TestConfigValidate_RejectsDuplicateHeaderName(t *testing.T) {
 
 func TestConfigValidate_RejectsEmptyMappingArray(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
-		{Claim: "memberof", Header: "X-Roles", Mapping: []forward.Rule{}},
+		{Claim: "memberof", Name: "X-Roles", Mapping: []forward.Rule{}},
 	}}
 	err := cfg.Validate()
 	if err == nil || !strings.Contains(err.Error(), "mapping is present but empty") {
@@ -91,7 +91,7 @@ func TestConfigValidate_RejectsEmptyFromOrTo(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := forward.Config{Headers: []forward.Header{
-				{Claim: "memberof", Header: "X-Roles", Mapping: []forward.Rule{tc.rule}},
+				{Claim: "memberof", Name: "X-Roles", Mapping: []forward.Rule{tc.rule}},
 			}}
 			err := cfg.Validate()
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
