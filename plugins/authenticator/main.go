@@ -670,12 +670,15 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Enriched response: raw IdP fields + mapped object.
+	// Enriched response: raw IdP fields + mapped object (only when non-empty,
+	// i.e. when at least one forward.headers entry opted in via the As field).
 	enriched := make(map[string]any, len(parsed)+1)
 	for k, v := range parsed {
 		enriched[k] = v
 	}
-	enriched["mapped"] = res.Mapped
+	if len(res.Mapped) > 0 {
+		enriched["mapped"] = res.Mapped
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

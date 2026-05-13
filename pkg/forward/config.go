@@ -16,9 +16,17 @@ type Config struct {
 // explicitly empty non-nil slice (e.g. []Rule{}) is treated as a config
 // error and Validate rejects it. JSON/mapstructure unmarshalling produces
 // nil for an absent field, which is the well-formed case.
+//
+// As is an optional SPA-facing alias. When set, Apply publishes the mapped
+// value under this key in Result.Mapped (which the userinfo handler exposes
+// to the SPA). When empty, the entry is forwarded as an HTTP header to
+// upstream backends but is not published to the SPA. This lets operators
+// pick a clean, JSON-friendly identifier for SPA consumption without
+// coupling the SPA to HTTP-header naming conventions (e.g. the X- prefix).
 type Header struct {
 	Claim   string `mapstructure:"claim"             json:"claim"`
 	Name    string `mapstructure:"header"            json:"header"`
+	As      string `mapstructure:"as,omitempty"      json:"as,omitempty"`
 	Mapping []Rule `mapstructure:"mapping,omitempty" json:"mapping,omitempty"`
 }
 
@@ -33,7 +41,8 @@ func (c Config) Validate() error {
 	if len(c.Headers) == 0 {
 		return errors.New("forward: headers list is empty")
 	}
-	seen := map[string]bool{}
+	seenName := map[string]bool{}
+	seenAs := map[string]bool{}
 	for i, h := range c.Headers {
 		if h.Claim == "" {
 			return fmt.Errorf("forward.headers[%d]: claim is required", i)
@@ -41,10 +50,16 @@ func (c Config) Validate() error {
 		if h.Name == "" {
 			return fmt.Errorf("forward.headers[%d]: header is required", i)
 		}
-		if seen[h.Name] {
+		if seenName[h.Name] {
 			return fmt.Errorf("forward.headers[%d]: duplicate header %q", i, h.Name)
 		}
-		seen[h.Name] = true
+		seenName[h.Name] = true
+		if h.As != "" {
+			if seenAs[h.As] {
+				return fmt.Errorf("forward.headers[%d]: duplicate as %q", i, h.As)
+			}
+			seenAs[h.As] = true
+		}
 		if h.Mapping != nil {
 			if len(h.Mapping) == 0 {
 				return fmt.Errorf("forward.headers[%d]: mapping is present but empty", i)

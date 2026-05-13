@@ -15,9 +15,18 @@ type Diagnostic struct {
 }
 
 // Result is the output of Apply.
+//
+// Headers is keyed by HTTP header name and contains every configured entry
+// that produced a value; this is what backends receive.
+//
+// Mapped is keyed by Header.As and only contains entries whose configuration
+// set As to a non-empty string. Operators use As to opt entries into the
+// SPA-visible projection, keeping the JSON shape free of HTTP-header naming
+// conventions (e.g. the X- prefix) and dropping redundant identity-passthrough
+// entries that the SPA can already read from the raw IdP claims.
 type Result struct {
-	Headers     map[string]string // header-name → comma-joined wire value
-	Mapped      map[string]any    // header-name → scalar string OR []string (mirrors source claim shape)
+	Headers     map[string]string // HTTP-header name → comma-joined wire value
+	Mapped      map[string]any    // As → scalar string OR []string (mirrors source claim shape)
 	Diagnostics []Diagnostic
 }
 
@@ -65,13 +74,17 @@ func Apply(userinfo map[string]any, cfg Config) Result {
 func applyScalar(res *Result, h Header, value string) {
 	if len(h.Mapping) == 0 {
 		res.Headers[h.Name] = value
-		res.Mapped[h.Name] = value
+		if h.As != "" {
+			res.Mapped[h.As] = value
+		}
 		return
 	}
 	for _, r := range h.Mapping {
 		if strings.Contains(value, r.From) {
 			res.Headers[h.Name] = r.To
-			res.Mapped[h.Name] = r.To
+			if h.As != "" {
+				res.Mapped[h.As] = r.To
+			}
 			return
 		}
 	}
@@ -84,7 +97,9 @@ func applyScalar(res *Result, h Header, value string) {
 func applyArray(res *Result, h Header, values []string) {
 	if len(h.Mapping) == 0 {
 		res.Headers[h.Name] = strings.Join(values, ",")
-		res.Mapped[h.Name] = values
+		if h.As != "" {
+			res.Mapped[h.As] = values
+		}
 		return
 	}
 
@@ -116,7 +131,9 @@ func applyArray(res *Result, h Header, values []string) {
 		return
 	}
 	res.Headers[h.Name] = strings.Join(matched, ",")
-	res.Mapped[h.Name] = matched
+	if h.As != "" {
+		res.Mapped[h.As] = matched
+	}
 }
 
 func stringifyArrayItem(v any) string {

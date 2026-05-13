@@ -11,7 +11,7 @@ import (
 	"github.com/paulopiriquito/hog/pkg/forward"
 )
 
-func TestApply_ScalarClaim_NoMapping_PassesThrough(t *testing.T) {
+func TestApply_ScalarClaim_NoMapping_PassesThrough_HeaderOnly(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
 		{Claim: "sub", Name: "X-User-Id"},
 	}}
@@ -22,11 +22,30 @@ func TestApply_ScalarClaim_NoMapping_PassesThrough(t *testing.T) {
 	if got, want := res.Headers["X-User-Id"], "90019066"; got != want {
 		t.Errorf("headers: got %q, want %q", got, want)
 	}
-	if got, want := res.Mapped["X-User-Id"], "90019066"; got != want {
-		t.Errorf("mapped: got %v, want %q", got, want)
+	if len(res.Mapped) != 0 {
+		t.Errorf("expected empty Mapped (no As set), got %v", res.Mapped)
 	}
 	if len(res.Diagnostics) != 0 {
 		t.Errorf("expected no diagnostics, got %v", res.Diagnostics)
+	}
+}
+
+func TestApply_ScalarClaim_WithAs_PublishesToMapped(t *testing.T) {
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "sub", Name: "X-User-Id", As: "userId"},
+	}}
+	userinfo := map[string]any{"sub": "90019066"}
+
+	res := forward.Apply(userinfo, cfg)
+
+	if got := res.Headers["X-User-Id"]; got != "90019066" {
+		t.Errorf("headers: got %q, want %q", got, "90019066")
+	}
+	if got := res.Mapped["userId"]; got != "90019066" {
+		t.Errorf("mapped[\"userId\"]: got %v, want %q", got, "90019066")
+	}
+	if _, present := res.Mapped["X-User-Id"]; present {
+		t.Errorf("Mapped must be keyed by As, not by HTTP header name")
 	}
 }
 
@@ -43,9 +62,9 @@ func TestApply_NumericScalarStringifies(t *testing.T) {
 	}
 }
 
-func TestApply_ArrayClaim_NoMapping_JoinsCommaSeparated(t *testing.T) {
+func TestApply_ArrayClaim_NoMapping_JoinsCommaSeparated_WithAs(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
-		{Claim: "groups", Name: "X-Groups"},
+		{Claim: "groups", Name: "X-Groups", As: "groups"},
 	}}
 	userinfo := map[string]any{"groups": []any{"admin", "user"}}
 
@@ -55,8 +74,8 @@ func TestApply_ArrayClaim_NoMapping_JoinsCommaSeparated(t *testing.T) {
 		t.Errorf("headers: got %q, want %q", got, want)
 	}
 	wantMapped := []string{"admin", "user"}
-	if got, ok := res.Mapped["X-Groups"].([]string); !ok || !reflect.DeepEqual(got, wantMapped) {
-		t.Errorf("mapped: got %v, want %v", res.Mapped["X-Groups"], wantMapped)
+	if got, ok := res.Mapped["groups"].([]string); !ok || !reflect.DeepEqual(got, wantMapped) {
+		t.Errorf("mapped[\"groups\"]: got %v, want %v", res.Mapped["groups"], wantMapped)
 	}
 }
 
@@ -127,7 +146,7 @@ func TestApply_ScalarClaim_MappingNoMatch_OmitsHeader(t *testing.T) {
 
 func TestApply_ArrayClaim_MappingFiltersRenamesDedups(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
-		{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
+		{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
 			{From: "cn=KRONOS,", To: "KRONOS-USER"},
 			{From: "cn=GITHUB,", To: "GITHUB-MEMBER"},
 		}},
@@ -145,9 +164,9 @@ func TestApply_ArrayClaim_MappingFiltersRenamesDedups(t *testing.T) {
 	if got := res.Headers["X-User-Roles"]; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	mapped, ok := res.Mapped["X-User-Roles"].([]string)
+	mapped, ok := res.Mapped["roles"].([]string)
 	if !ok {
-		t.Fatalf("mapped not []string: %v", res.Mapped["X-User-Roles"])
+		t.Fatalf("mapped[\"roles\"] not []string: %v", res.Mapped["roles"])
 	}
 	if !reflect.DeepEqual(mapped, []string{"KRONOS-USER", "GITHUB-MEMBER"}) {
 		t.Errorf("mapped got %v", mapped)
@@ -245,6 +264,9 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 		t.Fatalf("unmarshal fixture: %v", err)
 	}
 
+	// Identity passthroughs are forwarded as HTTP headers but NOT published
+	// to Mapped (no As set) — the SPA already has these fields in the raw
+	// IdP response. Only "roles" opts into Mapped via As.
 	cfg := forward.Config{Headers: []forward.Header{
 		{Claim: "sub", Name: "X-User-Id"},
 		{Claim: "email", Name: "X-User-Email"},
@@ -254,6 +276,7 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 		{
 			Claim: "memberof",
 			Name:  "X-User-Roles",
+			As:    "roles",
 			Mapping: []forward.Rule{
 				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
 				{From: "cn=PT-LM-ROLE-invoice-portal-search_invoices,", To: "INVOICE-SEARCH"},
@@ -277,16 +300,16 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 		t.Errorf("headers mismatch:\ngot:  %v\nwant: %v", res.Headers, wantHeaders)
 	}
 
-	mappedRoles, ok := res.Mapped["X-User-Roles"].([]string)
+	// Mapped should contain ONLY the entry that opted in via As.
+	if len(res.Mapped) != 1 {
+		t.Errorf("Mapped should contain only the As-opted entry, got %d entries: %v", len(res.Mapped), res.Mapped)
+	}
+	mappedRoles, ok := res.Mapped["roles"].([]string)
 	if !ok {
-		t.Fatalf("mapped roles not []string: %T", res.Mapped["X-User-Roles"])
+		t.Fatalf("mapped[\"roles\"] not []string: %T", res.Mapped["roles"])
 	}
 	wantRoles := []string{"INVOICE-SEARCH", "INVOICE-DOWNLOAD", "GITHUB-MEMBER", "KRONOS-USER"}
 	if !reflect.DeepEqual(mappedRoles, wantRoles) {
 		t.Errorf("mapped roles: got %v, want %v", mappedRoles, wantRoles)
-	}
-
-	if got := res.Mapped["X-User-Department"]; got != "320" {
-		t.Errorf("X-User-Department mapped: got %v, want \"320\"", got)
 	}
 }

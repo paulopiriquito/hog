@@ -70,6 +70,29 @@ func TestConfigValidate_RejectsDuplicateHeaderName(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_RejectsDuplicateAs(t *testing.T) {
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "sub", Name: "X-User-Id", As: "userId"},
+		{Claim: "uid", Name: "X-Uid", As: "userId"},
+	}}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "duplicate as") {
+		t.Fatalf("expected duplicate-as error, got: %v", err)
+	}
+}
+
+func TestConfigValidate_EmptyAsTreatedAsAbsent(t *testing.T) {
+	// Two entries with no As (default zero value) must NOT trip the
+	// duplicate-as check — empty As means "not published to Mapped".
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "sub", Name: "X-User-Id"},
+		{Claim: "email", Name: "X-User-Email"},
+	}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected no error for two entries without As, got: %v", err)
+	}
+}
+
 func TestConfigValidate_RejectsEmptyMappingArray(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
 		{Claim: "memberof", Name: "X-Roles", Mapping: []forward.Rule{}},

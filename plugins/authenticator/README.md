@@ -129,6 +129,7 @@ The plugin can be configured to project any property from the IdP's `/userinfo` 
       {
         "claim":  "memberof",
         "header": "X-User-Roles",
+        "as":     "roles",
         "mapping": [
           { "from": "cn=PT-LM-ROLE-KRONOS-USER,", "to": "KRONOS-USER" },
           { "from": "cn=GLOBAL-ROLE-GITHUB-",     "to": "GITHUB-MEMBER" }
@@ -138,6 +139,26 @@ The plugin can be configured to project any property from the IdP's `/userinfo` 
   }
 }
 ```
+
+### Field reference
+
+| Field | Required | Description |
+|---|---|---|
+| `claim` | yes | Userinfo property to read. Supports dotted paths (e.g. `realm_access.roles`). |
+| `header` | yes | HTTP header name forwarded to upstream backends. |
+| `as` | no | JSON-friendly key under which the mapped value is published to the SPA via `/oauth/userinfo`'s `mapped` field. **Omit to forward only as a header without exposing to the SPA.** Identity-passthrough entries (sub/email/name/etc.) typically omit `as` because the SPA can already read those claims from the raw IdP response. |
+| `mapping` | no | Substring filter/rename rules. See "Behavior" below. |
+
+### Mapped vs Headers — the two outputs
+
+A single `forward.headers` entry produces up to two outputs:
+
+- **HTTP header** to backends (always, if the claim resolves and matches rules). Keyed by `header`.
+- **SPA-visible field** under `mapped.{as}` in `/oauth/userinfo` (only when `as` is set). Keyed by `as`.
+
+This split lets operators:
+- Forward identity attributes to backends without bloating the SPA-visible JSON with redundant entries (the SPA already has `sub`, `email`, etc. from the raw IdP response).
+- Choose clean, language-agnostic JSON identifiers (`roles`, `userId`) instead of leaking HTTP-header conventions (`X-User-Roles`) into the JSON contract.
 
 ### Behavior
 

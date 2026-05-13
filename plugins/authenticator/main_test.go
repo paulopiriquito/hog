@@ -1053,8 +1053,11 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 	cfg := PluginConfig{
 		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
 		Forward: forward.Config{Headers: []forward.Header{
+			// X-User-Id is forwarded to backends but NOT published to mapped
+			// (no As) — the SPA can read "sub" from the raw IdP fields.
 			{Claim: "sub", Name: "X-User-Id"},
-			{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
+			// X-User-Roles opts into mapped under the JSON-friendly key "roles".
+			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
 				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
 			}},
 		}},
@@ -1078,13 +1081,18 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
 	mapped, ok := body["mapped"].(map[string]any)
 	require.True(t, ok, "expected mapped field")
-	assert.Equal(t, "abc", mapped["X-User-Id"])
-	roles, ok := mapped["X-User-Roles"].([]any)
-	require.True(t, ok)
+
+	// Only the As-opted entry should appear in mapped.
+	require.Len(t, mapped, 1, "mapped should contain only the As-opted entry, got %v", mapped)
+	_, hasOldKey := mapped["X-User-Id"]
+	assert.False(t, hasOldKey, "X-User-Id (no As) must not appear in mapped")
+
+	roles, ok := mapped["roles"].([]any)
+	require.True(t, ok, "expected mapped[\"roles\"] to be an array")
 	require.Len(t, roles, 1)
 	assert.Equal(t, "KRONOS-USER", roles[0])
 
-	// Cookie refreshed
+	// Cookie refreshed with wire headers (independent of As).
 	var refreshed string
 	for _, c := range resp.Cookies() {
 		if c.Name == "auth_session" {
@@ -1094,6 +1102,7 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 	require.NotEmpty(t, refreshed)
 	data, err := session.DecryptSessionCookie(refreshed, key)
 	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Headers["X-User-Id"])
 	assert.Equal(t, "KRONOS-USER", data.Headers["X-User-Roles"])
 }
 
