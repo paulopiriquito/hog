@@ -108,6 +108,82 @@ All `config` fields have sensible defaults:
 | `session-cookie-name` | `auth_session` |
 | `well-known` | `/.well-known/openid-configuration` |
 
+## Forwarding userinfo properties as headers
+
+The plugin can be configured to project any property from the IdP's `/userinfo` response into a custom HTTP header forwarded to upstream backends. This **replaces** the default `X-User-Id` / `X-User-Email` / `X-User-Name` family with an explicit allowlist.
+
+> **Migration note:** As of this plugin version, the legacy hardcoded `X-User-Id` / `X-User-Email` / `X-User-Name` headers are emitted only when `forward.headers` is **absent**. To customize identity headers or forward additional properties (such as roles), configure `forward.headers` and declare every header you want backends to see.
+
+### Configuration
+
+```json
+"hog-authenticator": {
+  "idp":    { "type": "oidc" },
+  "config": { "scopes": "openid profile email groups" },
+  "forward": {
+    "headers": [
+      { "claim": "sub",                    "header": "X-User-Id" },
+      { "claim": "email",                  "header": "X-User-Email" },
+      { "claim": "name",                   "header": "X-User-Name" },
+      { "claim": "employeeNumber",         "header": "X-User-EmployeeNumber" },
+      {
+        "claim":  "memberof",
+        "header": "X-User-Roles",
+        "mapping": [
+          { "from": "cn=PT-LM-ROLE-KRONOS-USER,", "to": "KRONOS-USER" },
+          { "from": "cn=GLOBAL-ROLE-GITHUB-",     "to": "GITHUB-MEMBER" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Behavior
+
+| Claim type                  | `mapping` present | Result                                                                                                       |
+|-----------------------------|-------------------|--------------------------------------------------------------------------------------------------------------|
+| Scalar (string/number/bool) | no                | Header value is the stringified claim.                                                                       |
+| Scalar                      | yes               | First rule whose `from` is a substring of the value wins; emit `to`. No match → header is not emitted.       |
+| Array of scalars            | no                | Comma-joined values.                                                                                          |
+| Array of scalars            | yes               | Filter (first-match-wins per value), rename to `to`, deduplicate, comma-join. Empty result → not emitted.    |
+| Missing claim               | —                 | Header is not emitted; logged at debug.                                                                       |
+| Wrong type (object, null)   | —                 | Header is not emitted; logged at warning.                                                                     |
+
+### Data source
+
+Mapped values come from the IdP's `/userinfo` response, fetched once at login and re-fetched whenever the SPA calls `/oauth/userinfo`. The result is stored in the encrypted session cookie, so per-request backend forwarding does not call the IdP.
+
+### Refreshing mapped roles without a re-login
+
+Have the SPA call `GET /oauth/userinfo`. The plugin:
+
+1. Re-fetches userinfo from the IdP using the access token.
+2. Re-applies `forward.headers`.
+3. Updates the session cookie's Headers via `Set-Cookie`.
+4. Returns the raw IdP JSON plus a top-level `mapped` object the SPA can read.
+
+The next backend request carries the refreshed headers automatically.
+
+### Allowlist vs. default behavior
+
+- **`forward.headers` absent:** the plugin emits the hardcoded legacy headers `X-User-Id`, `X-User-Email`, `X-User-Name` from id_token claims (pre-feature behavior).
+- **`forward.headers` present:** the plugin emits **only** the headers listed. If you still want `X-User-Id`, declare it in `forward.headers`. `Authorization: Bearer <jwt>` and `Identity: <id_token>` are emitted in both modes.
+
+### Trust boundary
+
+This feature emits identity- and role-information as HTTP headers. **Backends are expected to trust those headers only when they are reachable solely via the gateway** (e.g., a Kubernetes namespace with ingress routing only to the gateway). If a backend ever becomes reachable through any other path, header signing (HMAC or a gateway-issued short-lived JWT) must be added before exposing it. The plugin does not sign forwarded headers.
+
+### Common IdP claim names
+
+| IdP                                | Roles/groups claim    | Notes                                                          |
+|------------------------------------|-----------------------|----------------------------------------------------------------|
+| Dex (with `groups` scope)          | `groups`              | Static passwords' `groups` field; values are arbitrary strings.|
+| Keycloak                           | `realm_access.roles`  | Use dotted path.                                                |
+| LDAP-OIDC bridge                   | `memberof`            | Values are full LDAP DNs; use substring rules to filter/rename.|
+| Okta                               | `groups`              | Requires `groups` scope and OIDC group claim configuration.    |
+| Auth0                              | Custom-namespaced     | E.g., `https://myapp.com/roles`; depends on Rule/Action setup. |
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
