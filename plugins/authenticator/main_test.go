@@ -607,17 +607,21 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 
 	config := createValidConfig()
 
-	// Create a JWT with user claims (sub, email, name)
-	// JWT format: header.payload.signature
+	// Create a JWT (used only for the Authorization header now)
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123","email":"user@example.com","name":"Test User"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123"}`))
 	testJWT := header + "." + payload + ".signature"
 
-	// Create encrypted session cookie
+	// Create encrypted session cookie. Identity claims now live in
+	// dedicated Sub/Email/Name fields rather than being parsed from JWT
+	// on each request.
 	sessionData := session.SessionData{
 		JWT:       testJWT,
 		Identity:  testJWT,
 		SessionID: "session-123",
+		Sub:       "user-123",
+		Email:     "user@example.com",
+		Name:      "Test User",
 	}
 	encryptedCookie, err := session.EncryptSessionCookie(sessionData, config.Config.SessionKey)
 	require.NoError(t, err)
@@ -957,9 +961,11 @@ func makeTestJWT(t *testing.T, sub string) string {
 
 func TestInjectAuthorizationHeader_DefaultMode_SetsXUserHeaders(t *testing.T) {
 	key := "12345678901234567890123456789012"
-	jwt := makeTestJWTWithClaims(t, `{"sub":"abc","email":"a@b.com","name":"A B","exp":`+
-		fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())+`}`)
-	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, Identity: jwt}, key)
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, Identity: jwt,
+		Sub: "abc", Email: "a@b.com", Name: "A B",
+	}, key)
 	require.NoError(t, err)
 
 	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
@@ -1274,4 +1280,31 @@ func TestHandleUserInfo_RefreshUpdatesClaimsOnFullResponse(t *testing.T) {
 	assert.Equal(t, "abc", data.Sub)
 	assert.Equal(t, "new@example.com", data.Email, "Email should update when userinfo provides a fresh value")
 	assert.Equal(t, "New Name", data.Name, "Name should update when userinfo provides a fresh value")
+}
+
+func TestInjectAuthorizationHeader_NoLongerEmitsIdentityHeader(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, Identity: jwt, SessionID: "sid",
+		Sub: "abc", Email: "a@b.com", Name: "A B",
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, captured.Get("Identity"), "the Identity header must no longer be emitted")
+	// Sanity-check: default-mode identity headers still come through.
+	assert.Equal(t, "abc", captured.Get("X-User-Id"))
+	assert.Equal(t, "a@b.com", captured.Get("X-User-Email"))
+	assert.Equal(t, "A B", captured.Get("X-User-Name"))
 }

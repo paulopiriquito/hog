@@ -643,8 +643,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sub := extractSubFromJWT(sessionData.Identity)
-	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sub, sessionData.SessionID))
+	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sessionData.Sub, sessionData.SessionID))
 
 	// Pass-through mode when forward is not configured.
 	if len(config.Forward.Headers) == 0 {
@@ -751,28 +750,25 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 	}
 
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
-	r.Header.Set("Identity", sessionData.Identity)
 
 	if len(config.Forward.Headers) > 0 {
-		// Allowlist mode: emit configured headers from session.
+		// Forward mode: emit configured headers from session.
 		for name, value := range sessionData.Headers {
 			r.Header.Set(name, value)
 		}
 		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
 			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
 	} else {
-		// Default mode: identity headers from id_token JWT.
-		// Applies when forward.headers is absent — emits the built-in
-		// X-User-Id/Email/Name set extracted from id_token claims.
-		userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
-		if userClaims.Sub != "" && userClaims.Sub != "unknown" {
-			r.Header.Set("X-User-Id", userClaims.Sub)
+		// Default mode: identity headers from cached struct fields.
+		// Sub/Email/Name are populated at login from id_token claims.
+		if sessionData.Sub != "" && sessionData.Sub != "unknown" {
+			r.Header.Set("X-User-Id", sessionData.Sub)
 		}
-		if userClaims.Email != "" {
-			r.Header.Set("X-User-Email", userClaims.Email)
+		if sessionData.Email != "" {
+			r.Header.Set("X-User-Email", sessionData.Email)
 		}
-		if userClaims.Name != "" {
-			r.Header.Set("X-User-Name", userClaims.Name)
+		if sessionData.Name != "" {
+			r.Header.Set("X-User-Name", sessionData.Name)
 		}
 		logger.Debug(fmt.Sprintf("Injected default identity headers session_id=%s path=%s",
 			sessionData.SessionID, r.URL.Path))
