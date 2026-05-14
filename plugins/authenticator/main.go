@@ -736,12 +736,26 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
 
 	if len(config.Forward.Headers) > 0 {
+		// Strip any client-sent values for configured forward headers before
+		// emitting the computed values: prevents an authenticated client from
+		// spoofing a header whose computed value is absent (e.g. user has no
+		// matching role → X-User-Roles is not in sessionData.Headers).
+		for _, h := range config.Forward.Headers {
+			r.Header.Del(h.Name)
+		}
 		for name, value := range sessionData.Headers {
 			r.Header.Set(name, value)
 		}
 		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
 			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
 	} else {
+		// Strip default-mode header names unconditionally, then re-set only
+		// when the cached struct fields are populated. Closes the spoofing
+		// window for cookies issued before identity claims were cached
+		// (those decode with empty Sub/Email/Name).
+		r.Header.Del("X-User-Id")
+		r.Header.Del("X-User-Email")
+		r.Header.Del("X-User-Name")
 		if sessionData.Sub != "" && sessionData.Sub != "unknown" {
 			r.Header.Set("X-User-Id", sessionData.Sub)
 		}

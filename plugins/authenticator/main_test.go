@@ -1328,6 +1328,74 @@ func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
 		"unexpected JSON shape for mapped.roles")
 }
 
+func TestInjectAuthorizationHeader_ForwardMode_StripsClientHeadersWithoutComputedValue(t *testing.T) {
+	// Regression: a logged-in client must not be able to spoof a configured
+	// forward header whose computed value is absent from sessionData.Headers
+	// (e.g. user has no matching role → X-User-Roles is not in the cookie).
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		Headers: map[string]string{"X-User-Id": "abc"},
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles"},
+		}},
+	}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	// Client tries to spoof a configured header that has no computed value.
+	req.Header.Set("X-User-Roles", "ADMIN")
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", captured.Get("X-User-Id"), "computed value must reach the backend")
+	assert.Empty(t, captured.Get("X-User-Roles"),
+		"client-sent X-User-Roles must be stripped when the cookie has no computed value for it")
+}
+
+func TestInjectAuthorizationHeader_DefaultMode_StripsClientHeadersWhenSessionFieldsEmpty(t *testing.T) {
+	// Regression: in default mode, when the cookie's Sub/Email/Name are empty
+	// (e.g. a cookie issued before identity caching), the guarded Set does not
+	// fire. The unconditional Del ensures the client cannot inject those
+	// headers either.
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		// Sub/Email/Name intentionally empty.
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	req.Header.Set("X-User-Id", "admin")
+	req.Header.Set("X-User-Email", "admin@example.com")
+	req.Header.Set("X-User-Name", "Spoofed Admin")
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, captured.Get("X-User-Id"), "client-sent X-User-Id must be stripped when session has no Sub")
+	assert.Empty(t, captured.Get("X-User-Email"), "client-sent X-User-Email must be stripped when session has no Email")
+	assert.Empty(t, captured.Get("X-User-Name"), "client-sent X-User-Name must be stripped when session has no Name")
+}
+
 func TestInjectAuthorizationHeader_NoLongerEmitsIdentityHeader(t *testing.T) {
 	key := "12345678901234567890123456789012"
 	jwt := makeTestJWT(t, "abc")

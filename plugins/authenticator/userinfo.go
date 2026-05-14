@@ -69,7 +69,7 @@ func doUserInfoRequest(ctx context.Context, accessToken string) ([]byte, error) 
 		return nil, fmt.Errorf("read userinfo body: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return body, fmt.Errorf("userinfo status %d", resp.StatusCode)
+		return body, fmt.Errorf("userinfo status %d: %s", resp.StatusCode, string(body))
 	}
 	return body, nil
 }
