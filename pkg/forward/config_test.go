@@ -81,6 +81,28 @@ func TestConfigValidate_RejectsDuplicateAs(t *testing.T) {
 	}
 }
 
+func TestConfigValidate_RejectsCRLFInHeaderName(t *testing.T) {
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "sub", Name: "X-User-Id\r\nX-Admin: yes"},
+	}}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "contains CR or LF") {
+		t.Fatalf("expected CR/LF rejection on header name, got: %v", err)
+	}
+}
+
+func TestConfigValidate_RejectsCRLFInMappingTo(t *testing.T) {
+	cfg := forward.Config{Headers: []forward.Header{
+		{Claim: "memberof", Name: "X-Roles", Mapping: []forward.Rule{
+			{From: "cn=A,", To: "A\r\nX-Admin: yes"},
+		}},
+	}}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "contains CR or LF") {
+		t.Fatalf("expected CR/LF rejection on mapping.to, got: %v", err)
+	}
+}
+
 func TestConfigValidate_EmptyAsTreatedAsAbsent(t *testing.T) {
 	// Two entries with no As (default zero value) must NOT trip the
 	// duplicate-as check — empty As means "not published to Mapped".

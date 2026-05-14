@@ -3,6 +3,7 @@ package forward
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Config is the top-level forward-mapping configuration.
@@ -50,6 +51,9 @@ func (c Config) Validate() error {
 		if h.Name == "" {
 			return fmt.Errorf("forward.headers[%d]: header is required", i)
 		}
+		if containsCRLF(h.Name) {
+			return fmt.Errorf("forward.headers[%d]: header %q contains CR or LF", i, h.Name)
+		}
 		if seenName[h.Name] {
 			return fmt.Errorf("forward.headers[%d]: duplicate header %q", i, h.Name)
 		}
@@ -71,8 +75,20 @@ func (c Config) Validate() error {
 				if r.To == "" {
 					return fmt.Errorf("forward.headers[%d].mapping[%d]: to is required", i, j)
 				}
+				if containsCRLF(r.To) {
+					return fmt.Errorf("forward.headers[%d].mapping[%d]: to %q contains CR or LF", i, j, r.To)
+				}
 			}
 		}
 	}
 	return nil
+}
+
+// containsCRLF reports whether s contains a carriage return or line feed,
+// which would allow HTTP header injection if interpolated into a Set request.
+// Operator-controlled fields are checked at config load time so misconfigs
+// fail loud at startup rather than at request time with an opaque net/http
+// "invalid header field value" error.
+func containsCRLF(s string) bool {
+	return strings.ContainsAny(s, "\r\n")
 }

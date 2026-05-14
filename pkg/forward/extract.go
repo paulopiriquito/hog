@@ -6,12 +6,24 @@ import (
 	"strings"
 )
 
-// Diagnostic describes why a configured header was not emitted.
+// Diagnostic reason strings. Exported so that callers (e.g. the authenticator
+// plugin) can switch on these values without duplicating the literals — a typo
+// on the consumer side would otherwise silently drop into a default branch.
+const (
+	ReasonMissingClaim = "missing_claim" // the configured claim path did not resolve in the userinfo map
+	ReasonWrongType    = "wrong_type"    // the resolved value was not a scalar or array of scalars
+	ReasonNoMatches    = "no_matches"    // mapping rules were configured but none matched any value
+)
+
+// Diagnostic describes why a configured header was not emitted. Reason takes
+// one of the Reason* constants above. Samples is populated only when Reason is
+// ReasonNoMatches: up to 3 raw values truncated to 80 chars (or exactly one
+// sample for the scalar-source case).
 type Diagnostic struct {
 	Header  string
 	Claim   string
-	Reason  string   // "missing_claim", "wrong_type", "no_matches"
-	Samples []string // up to 3 raw values (truncated to 80 chars) when reason is "no_matches"
+	Reason  string
+	Samples []string
 }
 
 // Result is the output of Apply.
@@ -42,7 +54,7 @@ func Apply(userinfo map[string]any, cfg Config) Result {
 		raw, ok := Resolve(userinfo, h.Claim)
 		if !ok {
 			res.Diagnostics = append(res.Diagnostics, Diagnostic{
-				Header: h.Name, Claim: h.Claim, Reason: "missing_claim",
+				Header: h.Name, Claim: h.Claim, Reason: ReasonMissingClaim,
 			})
 			continue
 		}
@@ -64,7 +76,7 @@ func Apply(userinfo map[string]any, cfg Config) Result {
 			applyArray(&res, h, values)
 		default:
 			res.Diagnostics = append(res.Diagnostics, Diagnostic{
-				Header: h.Name, Claim: h.Claim, Reason: "wrong_type",
+				Header: h.Name, Claim: h.Claim, Reason: ReasonWrongType,
 			})
 		}
 	}
@@ -89,7 +101,7 @@ func applyScalar(res *Result, h Header, value string) {
 		}
 	}
 	res.Diagnostics = append(res.Diagnostics, Diagnostic{
-		Header: h.Name, Claim: h.Claim, Reason: "no_matches",
+		Header: h.Name, Claim: h.Claim, Reason: ReasonNoMatches,
 		Samples: []string{truncate(value, 80)},
 	})
 }
@@ -125,7 +137,7 @@ func applyArray(res *Result, h Header, values []string) {
 
 	if len(matched) == 0 {
 		res.Diagnostics = append(res.Diagnostics, Diagnostic{
-			Header: h.Name, Claim: h.Claim, Reason: "no_matches",
+			Header: h.Name, Claim: h.Claim, Reason: ReasonNoMatches,
 			Samples: samples,
 		})
 		return

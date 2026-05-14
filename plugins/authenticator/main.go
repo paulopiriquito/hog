@@ -526,7 +526,7 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
 
-	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	fwdHeaders, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
 	if fwdErr != nil {
 		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
 	}
@@ -597,7 +597,7 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
 
-	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	fwdHeaders, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
 	if fwdErr != nil {
 		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
 	}
@@ -635,7 +635,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	rawBody, parsed, err := fetchUserInfoRaw(r.Context(), sessionData.JWT)
 	if err != nil {
-		logger.Warning(fmt.Sprintf("Userinfo fetch failed session_id=%s error=%v", sessionData.SessionID, err))
+		logger.Warning(fmt.Sprintf("Userinfo fetch failed, terminating session session_id=%s error=%v", sessionData.SessionID, err))
 		session.ClearSessionCookie(w, r, config.Config.SessionCookieName)
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -662,6 +662,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	res := forward.Apply(parsed, config.Forward)
 	emitForwardDiagnostics(res.Diagnostics, sessionData.SessionID)
+	logger.Info(fmt.Sprintf("forward.headers refreshed session_id=%s headers_emitted=%d", sessionData.SessionID, len(res.Headers)))
 
 	// Pull identity claims from the fresh userinfo response. Empty-preserving:
 	// missing fields in the response don't clobber values previously cached
@@ -819,33 +820,32 @@ func exchangeCodeForToken(ctx context.Context, config PluginConfig, code, verifi
 }
 
 // computeForwardHeaders fetches userinfo from the IdP and applies the forward
-// config. Returns the wire headers map (suitable for storing in the session
-// cookie) and a non-nil Result for callers that need the mapped view. On any
-// failure, returns nil headers and the error — callers decide whether to
-// continue without forwarding.
-func computeForwardHeaders(ctx context.Context, accessToken, sessionID string, cfg forward.Config) (map[string]string, forward.Result, error) {
+// config. Returns the wire-headers map (suitable for storing in the session
+// cookie). On any failure, returns nil and the error — callers decide whether
+// to continue without forwarding.
+func computeForwardHeaders(ctx context.Context, accessToken, sessionID string, cfg forward.Config) (map[string]string, error) {
 	if len(cfg.Headers) == 0 {
-		return nil, forward.Result{}, nil
+		return nil, nil
 	}
 	userinfo, err := fetchUserInfo(ctx, accessToken)
 	if err != nil {
-		return nil, forward.Result{}, err
+		return nil, err
 	}
 	res := forward.Apply(userinfo, cfg)
 	emitForwardDiagnostics(res.Diagnostics, sessionID)
 	logger.Info(fmt.Sprintf("forward.headers extracted session_id=%s headers_emitted=%d", sessionID, len(res.Headers)))
-	return res.Headers, res, nil
+	return res.Headers, nil
 }
 
 func emitForwardDiagnostics(diags []forward.Diagnostic, sessionID string) {
 	for _, d := range diags {
 		switch d.Reason {
-		case "missing_claim":
-			logger.Debug(fmt.Sprintf("forward.header skipped reason=missing_claim claim=%s header=%s session_id=%s", d.Claim, d.Header, sessionID))
-		case "wrong_type":
-			logger.Warning(fmt.Sprintf("forward.header skipped reason=wrong_type claim=%s header=%s session_id=%s", d.Claim, d.Header, sessionID))
-		case "no_matches":
-			logger.Info(fmt.Sprintf("forward.header skipped reason=no_matches claim=%s header=%s samples=%v session_id=%s", d.Claim, d.Header, d.Samples, sessionID))
+		case forward.ReasonMissingClaim:
+			logger.Debug(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s session_id=%s", d.Reason, d.Claim, d.Header, sessionID))
+		case forward.ReasonWrongType:
+			logger.Warning(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s session_id=%s", d.Reason, d.Claim, d.Header, sessionID))
+		case forward.ReasonNoMatches:
+			logger.Info(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s samples=%v session_id=%s", d.Reason, d.Claim, d.Header, d.Samples, sessionID))
 		}
 	}
 }

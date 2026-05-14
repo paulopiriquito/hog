@@ -90,7 +90,7 @@ func TestApply_MissingClaim_OmitsHeaderAndEmitsDiagnostic(t *testing.T) {
 	if _, present := res.Headers["X-Nope"]; present {
 		t.Errorf("expected header omitted")
 	}
-	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != "missing_claim" {
+	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != forward.ReasonMissingClaim {
 		t.Errorf("expected one missing_claim diagnostic, got %v", res.Diagnostics)
 	}
 }
@@ -106,7 +106,7 @@ func TestApply_WrongType_OmitsHeaderAndEmitsDiagnostic(t *testing.T) {
 	if _, present := res.Headers["X-Obj"]; present {
 		t.Errorf("expected header omitted")
 	}
-	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != "wrong_type" {
+	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != forward.ReasonWrongType {
 		t.Errorf("expected one wrong_type diagnostic, got %v", res.Diagnostics)
 	}
 }
@@ -139,7 +139,7 @@ func TestApply_ScalarClaim_MappingNoMatch_OmitsHeader(t *testing.T) {
 	if _, present := res.Headers["X-Role"]; present {
 		t.Errorf("expected header omitted")
 	}
-	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != "no_matches" {
+	if len(res.Diagnostics) != 1 || res.Diagnostics[0].Reason != forward.ReasonNoMatches {
 		t.Errorf("expected no_matches diagnostic, got %v", res.Diagnostics)
 	}
 }
@@ -213,7 +213,7 @@ func TestApply_ArrayClaim_AllUnmatched_OmitsHeaderWithSamples(t *testing.T) {
 		t.Fatalf("expected one diagnostic, got %v", res.Diagnostics)
 	}
 	d := res.Diagnostics[0]
-	if d.Reason != "no_matches" {
+	if d.Reason != forward.ReasonNoMatches {
 		t.Errorf("reason: got %q, want no_matches", d.Reason)
 	}
 	if len(d.Samples) != 3 {

@@ -1266,6 +1266,68 @@ func TestHandleUserInfo_RefreshUpdatesClaimsOnFullResponse(t *testing.T) {
 	assert.Equal(t, "New Name", data.Name, "Name should update when userinfo provides a fresh value")
 }
 
+func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
+	// Verifies the raw JSON byte shape of the /oauth/userinfo response
+	// for the `mapped` field — not just the post-decode Go types. Locks
+	// the SPA contract: scalar source → scalar JSON; array source → JSON
+	// array (even with a single element).
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id", As: "userId"},
+			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
+				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+			}},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid", Sub: "abc",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Decode just one level, leaving `mapped` and its children as raw JSON.
+	var top map[string]json.RawMessage
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&top))
+	require.Contains(t, top, "mapped")
+
+	var mapped map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(top["mapped"], &mapped))
+
+	// Scalar source (sub) MUST serialize as a JSON string.
+	require.Contains(t, mapped, "userId")
+	assert.Equal(t, `"abc"`, string(mapped["userId"]),
+		"scalar source must emit a JSON string, not an array")
+
+	// Array source (memberof) MUST serialize as a JSON array — even though
+	// only one element matched the mapping rules.
+	require.Contains(t, mapped, "roles")
+	rawRoles := string(mapped["roles"])
+	assert.True(t, strings.HasPrefix(rawRoles, "[") && strings.HasSuffix(rawRoles, "]"),
+		"array source must emit a JSON array, got: %s", rawRoles)
+	assert.Equal(t, `["KRONOS-USER"]`, rawRoles,
+		"unexpected JSON shape for mapped.roles")
+}
+
 func TestInjectAuthorizationHeader_NoLongerEmitsIdentityHeader(t *testing.T) {
 	key := "12345678901234567890123456789012"
 	jwt := makeTestJWT(t, "abc")
