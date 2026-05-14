@@ -112,7 +112,12 @@ All `config` fields have sensible defaults:
 
 The plugin can be configured to project any property from the IdP's `/userinfo` response into a custom HTTP header forwarded to upstream backends. This **replaces** the default `X-User-Id` / `X-User-Email` / `X-User-Name` family with an explicit allowlist.
 
-> **Migration note:** As of this plugin version, the legacy hardcoded `X-User-Id` / `X-User-Email` / `X-User-Name` headers are emitted only when `forward.headers` is **absent**. To customize identity headers or forward additional properties (such as roles), configure `forward.headers` and declare every header you want backends to see.
+> **Two modes coexist:**
+>
+> - **Default mode** (when `forward.headers` is absent): the plugin emits the built-in `X-User-Id` / `X-User-Email` / `X-User-Name` headers from id_token claims — unchanged from earlier versions.
+> - **Forward mode** (when `forward.headers` is configured): the plugin emits **only** the headers you declared, giving you full control over which claims become which headers, plus mapping rules for filtering and renaming.
+>
+> Both modes are first-class. Pick whichever fits your deployment.
 
 ### Configuration
 
@@ -188,12 +193,24 @@ The next backend request carries the refreshed headers automatically.
 
 ### Allowlist vs. default behavior
 
-- **`forward.headers` absent:** the plugin emits the hardcoded legacy headers `X-User-Id`, `X-User-Email`, `X-User-Name` from id_token claims (pre-feature behavior).
-- **`forward.headers` present:** the plugin emits **only** the headers listed. If you still want `X-User-Id`, declare it in `forward.headers`. `Authorization: Bearer <jwt>` and `Identity: <id_token>` are emitted in both modes.
+- **`forward.headers` absent (default mode):** the plugin emits the built-in headers `X-User-Id`, `X-User-Email`, `X-User-Name` from id_token claims.
+- **`forward.headers` present:** the plugin emits **only** the headers listed. If you still want `X-User-Id`, declare it in `forward.headers`. `Authorization: Bearer <jwt>` is the only auth header emitted unconditionally in both modes.
 
 ### Trust boundary
 
 This feature emits identity- and role-information as HTTP headers. **Backends are expected to trust those headers only when they are reachable solely via the gateway** (e.g., a Kubernetes namespace with ingress routing only to the gateway). If a backend ever becomes reachable through any other path, header signing (HMAC or a gateway-issued short-lived JWT) must be added before exposing it. The plugin does not sign forwarded headers.
+
+### Removed in this release: the `Identity` HTTP header
+
+The plugin no longer emits a raw `Identity: <id_token>` header on requests to upstream backends. The id_token is also no longer stored in the session cookie — identity claims (`sub`, `email`, `name`) are extracted once at login from the id_token and cached as small dedicated fields in the cookie, then read directly when emitting default-mode `X-User-*` headers (or fed into `forward.headers` mappings).
+
+**Migration:**
+
+1. **Cookie size shrinks immediately** after deploy — no operator action required. Savings range from ~700 B (production LDAP-OIDC bridge) to ~1.4 KB (IdPs that embed group claims in the id_token, e.g. Dex with the `groups` scope).
+2. **Backends that consumed the `Identity` header** must switch to:
+   - Reading `Authorization: Bearer <access_token>` and validating it via KrakenD's `auth/validator`, or
+   - Adding a `forward.headers` entry that projects whichever id_token claim the backend needs.
+3. **Cookies issued before this release** still decrypt and remain valid until their `MaxAge` expires (bounded by access-token expiry — typically a few hours). During this window, default-mode `X-User-Id` / `X-User-Email` / `X-User-Name` are absent because old cookies don't carry the new cached fields; the next login fixes it. Forward-mode deployments see no behavior change because the `Headers` map is intact. To skip the migration window entirely, rotate `AUTH_COOKIE_KEY` at deploy time — this invalidates all sessions and forces re-login.
 
 ### Common IdP claim names
 
