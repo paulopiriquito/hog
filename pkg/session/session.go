@@ -13,7 +13,6 @@ import (
 // Data represents the decrypted session cookie content
 type Data struct {
 	JWT       string            `json:"jwt"`
-	Identity  string            `json:"identity"`
 	SessionID string            `json:"session_id"`
 	Sub       string            `json:"sub,omitempty"`
 	Email     string            `json:"email,omitempty"`

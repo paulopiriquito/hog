@@ -220,21 +220,6 @@ func TestSessionCookieDecryptionInvalidData(t *testing.T) {
 	assert.Error(t, err)
 }
 
-func TestExtractSubFromJWT(t *testing.T) {
-	// Valid JWT with sub claim (eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMyIsIm5hbWUiOiJUZXN0IFVzZXIifQ.signature)
-	jwt := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMyIsIm5hbWUiOiJUZXN0IFVzZXIifQ.signature"
-	sub := extractSubFromJWT(jwt)
-	assert.Equal(t, "user-123", sub)
-}
-
-func TestExtractSubFromJWTInvalid(t *testing.T) {
-	sub := extractSubFromJWT("invalid.jwt")
-	assert.Equal(t, "unknown", sub)
-
-	sub = extractSubFromJWT("invalid")
-	assert.Equal(t, "unknown", sub)
-}
-
 func TestExtractUserClaimsFromJWT(t *testing.T) {
 	// Create a JWT with all user claims
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
@@ -617,7 +602,6 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 	// on each request.
 	sessionData := session.SessionData{
 		JWT:       testJWT,
-		Identity:  testJWT,
 		SessionID: "session-123",
 		Sub:       "user-123",
 		Email:     "user@example.com",
@@ -963,7 +947,7 @@ func TestInjectAuthorizationHeader_DefaultMode_SetsXUserHeaders(t *testing.T) {
 	key := "12345678901234567890123456789012"
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt,
+		JWT: jwt,
 		Sub: "abc", Email: "a@b.com", Name: "A B",
 	}, key)
 	require.NoError(t, err)
@@ -990,7 +974,7 @@ func TestInjectAuthorizationHeader_ForwardMode_EmitsConfiguredHeadersOnly(t *tes
 	key := "12345678901234567890123456789012"
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt,
+		JWT: jwt,
 		Headers: map[string]string{
 			"X-User-Id":    "abc",
 			"X-User-Roles": "KRONOS-USER,GITHUB-MEMBER",
@@ -1072,7 +1056,7 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt, SessionID: "sid",
+		JWT: jwt, SessionID: "sid",
 	}, key)
 	require.NoError(t, err)
 
@@ -1127,7 +1111,7 @@ func TestHandleUserInfo_WithoutForwardConfig_PassesThrough(t *testing.T) {
 	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
 
 	jwt := makeTestJWT(t, "abc")
-	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, Identity: jwt, SessionID: "sid"}, key)
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, SessionID: "sid"}, key)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
@@ -1207,7 +1191,7 @@ func TestHandleUserInfo_RefreshPreservesPriorClaimsOnPartialResponse(t *testing.
 
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt, SessionID: "sid",
+		JWT: jwt, SessionID: "sid",
 		Sub: "abc", Email: "prior@example.com", Name: "Prior Name",
 	}, key)
 	require.NoError(t, err)
@@ -1255,7 +1239,7 @@ func TestHandleUserInfo_RefreshUpdatesClaimsOnFullResponse(t *testing.T) {
 
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt, SessionID: "sid",
+		JWT: jwt, SessionID: "sid",
 		Sub: "abc", Email: "old@example.com", Name: "Old Name",
 	}, key)
 	require.NoError(t, err)
@@ -1286,7 +1270,7 @@ func TestInjectAuthorizationHeader_NoLongerEmitsIdentityHeader(t *testing.T) {
 	key := "12345678901234567890123456789012"
 	jwt := makeTestJWT(t, "abc")
 	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
-		JWT: jwt, Identity: jwt, SessionID: "sid",
+		JWT: jwt, SessionID: "sid",
 		Sub: "abc", Email: "a@b.com", Name: "A B",
 	}, key)
 	require.NoError(t, err)

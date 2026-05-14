@@ -534,7 +534,6 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	// Encrypt and set cookie
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       accessToken,
-		Identity:  idToken,
 		SessionID: sessionID,
 		Sub:       claims.Sub,
 		Email:     claims.Email,
@@ -606,7 +605,6 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	// Encrypt and set cookie
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       accessToken,
-		Identity:  idToken,
 		SessionID: sessionID,
 		Sub:       claims.Sub,
 		Email:     claims.Email,
@@ -684,7 +682,6 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	// Refresh cookie with new Headers and identity claims.
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       sessionData.JWT,
-		Identity:  sessionData.Identity,
 		SessionID: sessionData.SessionID,
 		Sub:       refreshedSub,
 		Email:     refreshedEmail,
@@ -819,14 +816,6 @@ func exchangeCodeForToken(ctx context.Context, config PluginConfig, code, verifi
 	}
 
 	return result, nil
-}
-
-// Helper: Extract sub from JWT (for audit logging only, no validation)
-// Using shared session package for JWT parsing
-
-func extractSubFromJWT(jwt string) string {
-	claims := session.ExtractUserClaimsFromJWT(jwt)
-	return claims.Sub
 }
 
 // computeForwardHeaders fetches userinfo from the IdP and applies the forward
