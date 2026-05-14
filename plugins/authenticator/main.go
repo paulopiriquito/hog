@@ -519,10 +519,12 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	idToken := token["id_token"].(string)
 	accessToken := token["access_token"].(string)
 
-	// Extract sub from JWT for audit logging
-	sub := extractSubFromJWT(idToken)
+	// Extract identity claims from id_token once at login; persisted to the
+	// cookie as small dedicated fields so default-mode injection and logging
+	// don't need to parse the JWT on every request.
+	claims := session.ExtractUserClaimsFromJWT(idToken)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
-	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
+	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
 
 	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
 	if fwdErr != nil {
@@ -534,6 +536,9 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 		JWT:       accessToken,
 		Identity:  idToken,
 		SessionID: sessionID,
+		Sub:       claims.Sub,
+		Email:     claims.Email,
+		Name:      claims.Name,
 		Headers:   fwdHeaders,
 	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
@@ -589,9 +594,9 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	idToken := token["id_token"].(string)
 	accessToken := token["access_token"].(string)
 
-	sub := extractSubFromJWT(idToken)
+	claims := session.ExtractUserClaimsFromJWT(idToken)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
-	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
+	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
 
 	fwdHeaders, _, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
 	if fwdErr != nil {
@@ -603,6 +608,9 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 		JWT:       accessToken,
 		Identity:  idToken,
 		SessionID: sessionID,
+		Sub:       claims.Sub,
+		Email:     claims.Email,
+		Name:      claims.Name,
 		Headers:   fwdHeaders,
 	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
@@ -658,11 +666,30 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	res := forward.Apply(parsed, config.Forward)
 	emitForwardDiagnostics(res.Diagnostics, sessionData.SessionID)
 
-	// Refresh cookie with new Headers.
+	// Pull identity claims from the fresh userinfo response. Empty-preserving:
+	// missing fields in the response don't clobber values previously cached
+	// in the cookie (protects against flaky/partial IdP responses).
+	refreshedSub := sessionData.Sub
+	if s, ok := parsed["sub"].(string); ok && s != "" {
+		refreshedSub = s
+	}
+	refreshedEmail := sessionData.Email
+	if s, ok := parsed["email"].(string); ok && s != "" {
+		refreshedEmail = s
+	}
+	refreshedName := sessionData.Name
+	if s, ok := parsed["name"].(string); ok && s != "" {
+		refreshedName = s
+	}
+
+	// Refresh cookie with new Headers and identity claims.
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       sessionData.JWT,
 		Identity:  sessionData.Identity,
 		SessionID: sessionData.SessionID,
+		Sub:       refreshedSub,
+		Email:     refreshedEmail,
+		Name:      refreshedName,
 		Headers:   res.Headers,
 	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to refresh session cookie: %v", err))
@@ -734,7 +761,9 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
 			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
 	} else {
-		// Legacy mode: identity headers from id_token JWT.
+		// Default mode: identity headers from id_token JWT.
+		// Applies when forward.headers is absent — emits the built-in
+		// X-User-Id/Email/Name set extracted from id_token claims.
 		userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
 		if userClaims.Sub != "" && userClaims.Sub != "unknown" {
 			r.Header.Set("X-User-Id", userClaims.Sub)
@@ -745,7 +774,7 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 		if userClaims.Name != "" {
 			r.Header.Set("X-User-Name", userClaims.Name)
 		}
-		logger.Debug(fmt.Sprintf("Injected legacy identity headers session_id=%s path=%s",
+		logger.Debug(fmt.Sprintf("Injected default identity headers session_id=%s path=%s",
 			sessionData.SessionID, r.URL.Path))
 	}
 
