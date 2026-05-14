@@ -36,3 +36,32 @@ func TestDataRoundtripWithHeaders(t *testing.T) {
 		t.Errorf("headers roundtrip mismatch: %v", out.Headers)
 	}
 }
+
+func TestDataRoundtripWithSubEmailName(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	data := Data{
+		JWT:       "j",
+		Identity:  "i",
+		SessionID: "s",
+		Sub:       "user-123",
+		Email:     "user@example.com",
+		Name:      "Test User",
+	}
+	enc, err := EncryptSessionCookie(data, key)
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	out, err := DecryptSessionCookie(enc, key)
+	if err != nil {
+		t.Fatalf("decrypt: %v", err)
+	}
+	if out.Sub != "user-123" {
+		t.Errorf("Sub: got %q, want %q", out.Sub, "user-123")
+	}
+	if out.Email != "user@example.com" {
+		t.Errorf("Email: got %q, want %q", out.Email, "user@example.com")
+	}
+	if out.Name != "Test User" {
+		t.Errorf("Name: got %q, want %q", out.Name, "Test User")
+	}
+}
