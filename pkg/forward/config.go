@@ -12,23 +12,11 @@ type Config struct {
 }
 
 // Header declares one userinfo-claim → HTTP-header mapping.
-//
-// Mapping may be nil to mean "no rename rules, pass values through". An
-// explicitly empty non-nil slice (e.g. []Rule{}) is treated as a config
-// error and Validate rejects it. JSON/mapstructure unmarshalling produces
-// nil for an absent field, which is the well-formed case.
-//
-// As is an optional SPA-facing alias. When set, Apply publishes the mapped
-// value under this key in Result.Mapped (which the userinfo handler exposes
-// to the SPA). When empty, the entry is forwarded as an HTTP header to
-// upstream backends but is not published to the SPA. This lets operators
-// pick a clean, JSON-friendly identifier for SPA consumption without
-// coupling the SPA to HTTP-header naming conventions (e.g. the X- prefix).
 type Header struct {
-	Claim   string `mapstructure:"claim"             json:"claim"`
-	Name    string `mapstructure:"header"            json:"header"`
-	As      string `mapstructure:"as,omitempty"      json:"as,omitempty"`
-	Mapping []Rule `mapstructure:"mapping,omitempty" json:"mapping,omitempty"`
+	Claim   string `mapstructure:"claim"             json:"claim"`             // userinfo claim path (dotted)
+	Name    string `mapstructure:"header"            json:"header"`            // output HTTP header
+	As      string `mapstructure:"as,omitempty"      json:"as,omitempty"`      // optional SPA-facing alias; empty = not published to mapped
+	Mapping []Rule `mapstructure:"mapping,omitempty" json:"mapping,omitempty"` // optional filter/rename rules; nil = passthrough
 }
 
 // Rule is one substring filter/rename rule within a Header's Mapping.
@@ -51,7 +39,7 @@ func (c Config) Validate() error {
 		if h.Name == "" {
 			return fmt.Errorf("forward.headers[%d]: header is required", i)
 		}
-		if containsCRLF(h.Name) {
+		if strings.ContainsAny(h.Name, "\r\n") {
 			return fmt.Errorf("forward.headers[%d]: header %q contains CR or LF", i, h.Name)
 		}
 		if seenName[h.Name] {
@@ -75,20 +63,11 @@ func (c Config) Validate() error {
 				if r.To == "" {
 					return fmt.Errorf("forward.headers[%d].mapping[%d]: to is required", i, j)
 				}
-				if containsCRLF(r.To) {
+				if strings.ContainsAny(r.To, "\r\n") {
 					return fmt.Errorf("forward.headers[%d].mapping[%d]: to %q contains CR or LF", i, j, r.To)
 				}
 			}
 		}
 	}
 	return nil
-}
-
-// containsCRLF reports whether s contains a carriage return or line feed,
-// which would allow HTTP header injection if interpolated into a Set request.
-// Operator-controlled fields are checked at config load time so misconfigs
-// fail loud at startup rather than at request time with an opaque net/http
-// "invalid header field value" error.
-func containsCRLF(s string) bool {
-	return strings.ContainsAny(s, "\r\n")
 }

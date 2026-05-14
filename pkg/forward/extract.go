@@ -6,19 +6,15 @@ import (
 	"strings"
 )
 
-// Diagnostic reason strings. Exported so that callers (e.g. the authenticator
-// plugin) can switch on these values without duplicating the literals — a typo
-// on the consumer side would otherwise silently drop into a default branch.
+// Reason values used in Diagnostic.Reason.
 const (
-	ReasonMissingClaim = "missing_claim" // the configured claim path did not resolve in the userinfo map
-	ReasonWrongType    = "wrong_type"    // the resolved value was not a scalar or array of scalars
-	ReasonNoMatches    = "no_matches"    // mapping rules were configured but none matched any value
+	ReasonMissingClaim = "missing_claim"
+	ReasonWrongType    = "wrong_type"
+	ReasonNoMatches    = "no_matches"
 )
 
-// Diagnostic describes why a configured header was not emitted. Reason takes
-// one of the Reason* constants above. Samples is populated only when Reason is
-// ReasonNoMatches: up to 3 raw values truncated to 80 chars (or exactly one
-// sample for the scalar-source case).
+// Diagnostic describes why a configured header was not emitted.
+// Samples carries up to 3 unmatched source values when Reason is ReasonNoMatches.
 type Diagnostic struct {
 	Header  string
 	Claim   string
@@ -26,19 +22,12 @@ type Diagnostic struct {
 	Samples []string
 }
 
-// Result is the output of Apply.
-//
-// Headers is keyed by HTTP header name and contains every configured entry
-// that produced a value; this is what backends receive.
-//
-// Mapped is keyed by Header.As and only contains entries whose configuration
-// set As to a non-empty string. Operators use As to opt entries into the
-// SPA-visible projection, keeping the JSON shape free of HTTP-header naming
-// conventions (e.g. the X- prefix) and dropping redundant identity-passthrough
-// entries that the SPA can already read from the raw IdP claims.
+// Result is the output of Apply. Headers is the wire-side projection (keyed
+// by HTTP header name); Mapped is the SPA-side projection (keyed by Header.As,
+// only entries with a non-empty As).
 type Result struct {
-	Headers     map[string]string // HTTP-header name → comma-joined wire value
-	Mapped      map[string]any    // As → scalar string OR []string (mirrors source claim shape)
+	Headers     map[string]string
+	Mapped      map[string]any
 	Diagnostics []Diagnostic
 }
 

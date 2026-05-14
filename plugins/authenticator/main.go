@@ -519,9 +519,6 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	idToken := token["id_token"].(string)
 	accessToken := token["access_token"].(string)
 
-	// Extract identity claims from id_token once at login; persisted to the
-	// cookie as small dedicated fields so default-mode injection and logging
-	// don't need to parse the JWT on every request.
 	claims := session.ExtractUserClaimsFromJWT(idToken)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
 	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
@@ -531,7 +528,6 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
 	}
 
-	// Encrypt and set cookie
 	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
 		JWT:       accessToken,
 		SessionID: sessionID,
@@ -643,17 +639,7 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sessionData.Sub, sessionData.SessionID))
 
-	// Pass-through mode when forward is not configured.
-	if len(config.Forward.Headers) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(rawBody)
-		return
-	}
-
-	// Forward mode: enrich response, refresh cookie Headers.
-	if parsed == nil {
-		// Body was not JSON — cannot enrich. Pass through.
+	if len(config.Forward.Headers) == 0 || parsed == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(rawBody)
@@ -664,51 +650,51 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	emitForwardDiagnostics(res.Diagnostics, sessionData.SessionID)
 	logger.Info(fmt.Sprintf("forward.headers refreshed session_id=%s headers_emitted=%d", sessionData.SessionID, len(res.Headers)))
 
-	// Pull identity claims from the fresh userinfo response. Empty-preserving:
-	// missing fields in the response don't clobber values previously cached
-	// in the cookie (protects against flaky/partial IdP responses).
-	refreshedSub := sessionData.Sub
-	if s, ok := parsed["sub"].(string); ok && s != "" {
-		refreshedSub = s
-	}
-	refreshedEmail := sessionData.Email
-	if s, ok := parsed["email"].(string); ok && s != "" {
-		refreshedEmail = s
-	}
-	refreshedName := sessionData.Name
-	if s, ok := parsed["name"].(string); ok && s != "" {
-		refreshedName = s
-	}
-
-	// Refresh cookie with new Headers and identity claims.
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
-		JWT:       sessionData.JWT,
-		SessionID: sessionData.SessionID,
-		Sub:       refreshedSub,
-		Email:     refreshedEmail,
-		Name:      refreshedName,
-		Headers:   res.Headers,
-	}); err != nil {
+	refreshed := refreshIdentityFromUserinfo(*sessionData, parsed)
+	refreshed.Headers = res.Headers
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), refreshed); err != nil {
 		logger.Error(fmt.Sprintf("Failed to refresh session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	// Enriched response: raw IdP fields + mapped object (only when non-empty,
-	// i.e. when at least one forward.headers entry opted in via the As field).
-	enriched := make(map[string]any, len(parsed)+1)
-	for k, v := range parsed {
-		enriched[k] = v
-	}
-	if len(res.Mapped) > 0 {
-		enriched["mapped"] = res.Mapped
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(enriched); err != nil {
+	if err := json.NewEncoder(w).Encode(buildEnrichedResponse(parsed, res.Mapped)); err != nil {
 		logger.Error(fmt.Sprintf("Failed to encode enriched userinfo: %v", err))
 	}
+}
+
+// refreshIdentityFromUserinfo returns a session.Data with Sub/Email/Name pulled
+// from the fresh userinfo response. Missing fields preserve the prior values —
+// a flaky IdP returning a partial response must not clobber what we already cached.
+func refreshIdentityFromUserinfo(prior session.Data, parsed map[string]any) session.Data {
+	pick := func(key, fallback string) string {
+		if s, ok := parsed[key].(string); ok && s != "" {
+			return s
+		}
+		return fallback
+	}
+	return session.Data{
+		JWT:       prior.JWT,
+		SessionID: prior.SessionID,
+		Sub:       pick("sub", prior.Sub),
+		Email:     pick("email", prior.Email),
+		Name:      pick("name", prior.Name),
+	}
+}
+
+// buildEnrichedResponse merges raw IdP fields with the SPA-facing mapped object.
+// mapped is omitted from the response when empty (no As-opted entries).
+func buildEnrichedResponse(parsed map[string]any, mapped map[string]any) map[string]any {
+	out := make(map[string]any, len(parsed)+1)
+	for k, v := range parsed {
+		out[k] = v
+	}
+	if len(mapped) > 0 {
+		out["mapped"] = mapped
+	}
+	return out
 }
 
 // Handler: Logout
@@ -750,15 +736,12 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
 
 	if len(config.Forward.Headers) > 0 {
-		// Forward mode: emit configured headers from session.
 		for name, value := range sessionData.Headers {
 			r.Header.Set(name, value)
 		}
 		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
 			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
 	} else {
-		// Default mode: identity headers from cached struct fields.
-		// Sub/Email/Name are populated at login from id_token claims.
 		if sessionData.Sub != "" && sessionData.Sub != "unknown" {
 			r.Header.Set("X-User-Id", sessionData.Sub)
 		}
@@ -819,10 +802,9 @@ func exchangeCodeForToken(ctx context.Context, config PluginConfig, code, verifi
 	return result, nil
 }
 
-// computeForwardHeaders fetches userinfo from the IdP and applies the forward
-// config. Returns the wire-headers map (suitable for storing in the session
-// cookie). On any failure, returns nil and the error — callers decide whether
-// to continue without forwarding.
+// computeForwardHeaders fetches userinfo and applies the forward config, returning
+// the wire-headers map for storage in the session cookie. Returns nil if cfg has
+// no headers configured.
 func computeForwardHeaders(ctx context.Context, accessToken, sessionID string, cfg forward.Config) (map[string]string, error) {
 	if len(cfg.Headers) == 0 {
 		return nil, nil
