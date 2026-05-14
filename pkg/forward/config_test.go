@@ -25,7 +25,7 @@ func TestConfigValidate_AcceptsMappingRules(t *testing.T) {
 				Claim:  "memberof",
 				Name:   "X-User-Roles",
 				Mapping: []forward.Rule{
-					{From: "cn=KRONOS,", To: "KRONOS-USER"},
+					{From: "cn=APP-A,", To: "APP-A-USER"},
 				},
 			},
 		},

@@ -147,20 +147,20 @@ func TestApply_ScalarClaim_MappingNoMatch_OmitsHeader(t *testing.T) {
 func TestApply_ArrayClaim_MappingFiltersRenamesDedups(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
 		{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
-			{From: "cn=KRONOS,", To: "KRONOS-USER"},
-			{From: "cn=GITHUB,", To: "GITHUB-MEMBER"},
+			{From: "cn=APP-A,", To: "APP-A-USER"},
+			{From: "cn=APP-B,", To: "APP-B-USER"},
 		}},
 	}}
 	userinfo := map[string]any{"memberof": []any{
-		"cn=KRONOS,ou=app,o=corp",
+		"cn=APP-A,ou=app,o=corp",
 		"cn=NOISE,ou=mail,o=corp", // unmatched, dropped
-		"cn=GITHUB,ou=app,o=corp",
-		"cn=KRONOS,ou=app,o=corp", // duplicate, dedup
+		"cn=APP-B,ou=app,o=corp",
+		"cn=APP-A,ou=app,o=corp", // duplicate, dedup
 	}}
 
 	res := forward.Apply(userinfo, cfg)
 
-	want := "KRONOS-USER,GITHUB-MEMBER"
+	want := "APP-A-USER,APP-B-USER"
 	if got := res.Headers["X-User-Roles"]; got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -168,7 +168,7 @@ func TestApply_ArrayClaim_MappingFiltersRenamesDedups(t *testing.T) {
 	if !ok {
 		t.Fatalf("mapped[\"roles\"] not []string: %v", res.Mapped["roles"])
 	}
-	if !reflect.DeepEqual(mapped, []string{"KRONOS-USER", "GITHUB-MEMBER"}) {
+	if !reflect.DeepEqual(mapped, []string{"APP-A-USER", "APP-B-USER"}) {
 		t.Errorf("mapped got %v", mapped)
 	}
 }
@@ -176,17 +176,17 @@ func TestApply_ArrayClaim_MappingFiltersRenamesDedups(t *testing.T) {
 func TestApply_FirstMatchWinsPerValue(t *testing.T) {
 	cfg := forward.Config{Headers: []forward.Header{
 		{Claim: "memberof", Name: "X-Roles", Mapping: []forward.Rule{
-			{From: "cn=PT-LM-ROLE-invoice-portal-search_invoices,", To: "INVOICE-SEARCH"},
-			{From: "cn=PT-LM-ROLE-invoice-portal-", To: "INVOICE-GENERIC"},
+			{From: "cn=PT-XP-ROLE-APP-B-SEARCH,", To: "APP-B-SEARCH"},
+			{From: "cn=PT-XP-ROLE-APP-B-", To: "APP-B-GENERIC"},
 		}},
 	}}
 	userinfo := map[string]any{"memberof": []any{
-		"cn=PT-LM-ROLE-invoice-portal-search_invoices,ou=app",
+		"cn=PT-XP-ROLE-APP-B-SEARCH,ou=app",
 	}}
 
 	res := forward.Apply(userinfo, cfg)
 
-	if got, want := res.Headers["X-Roles"], "INVOICE-SEARCH"; got != want {
+	if got, want := res.Headers["X-Roles"], "APP-B-SEARCH"; got != want {
 		t.Errorf("got %q, want %q (first rule should win)", got, want)
 	}
 }
@@ -278,9 +278,9 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 			Name:  "X-User-Roles",
 			As:    "roles",
 			Mapping: []forward.Rule{
-				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
-				{From: "cn=PT-LM-ROLE-invoice-portal-search_invoices,", To: "INVOICE-SEARCH"},
-				{From: "cn=PT-LM-ROLE-invoice-portal-invoice_download,", To: "INVOICE-DOWNLOAD"},
+				{From: "cn=PT-XP-ROLE-APP-C-USER,", To: "APP-C-USER"},
+				{From: "cn=PT-XP-ROLE-APP-B-SEARCH,", To: "APP-B-SEARCH"},
+				{From: "cn=PT-XP-ROLE-APP-B-DOWNLOAD,", To: "APP-B-DOWNLOAD"},
 				{From: "cn=GLOBAL-ROLE-GITHUB-CanJoin,", To: "GITHUB-MEMBER"},
 			},
 		},
@@ -294,7 +294,7 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 		"X-User-Name":           "TEST USER",
 		"X-User-EmployeeNumber": "99999999",
 		"X-User-Department":     "320",
-		"X-User-Roles":          "INVOICE-SEARCH,INVOICE-DOWNLOAD,GITHUB-MEMBER,KRONOS-USER",
+		"X-User-Roles":          "APP-B-SEARCH,APP-B-DOWNLOAD,GITHUB-MEMBER,APP-C-USER",
 	}
 	if !reflect.DeepEqual(res.Headers, wantHeaders) {
 		t.Errorf("headers mismatch:\ngot:  %v\nwant: %v", res.Headers, wantHeaders)
@@ -308,7 +308,7 @@ func TestApply_RealLDAPFixture_ProducesExpectedRolesAndIdentity(t *testing.T) {
 	if !ok {
 		t.Fatalf("mapped[\"roles\"] not []string: %T", res.Mapped["roles"])
 	}
-	wantRoles := []string{"INVOICE-SEARCH", "INVOICE-DOWNLOAD", "GITHUB-MEMBER", "KRONOS-USER"}
+	wantRoles := []string{"APP-B-SEARCH", "APP-B-DOWNLOAD", "GITHUB-MEMBER", "APP-C-USER"}
 	if !reflect.DeepEqual(mappedRoles, wantRoles) {
 		t.Errorf("mapped roles: got %v, want %v", mappedRoles, wantRoles)
 	}
