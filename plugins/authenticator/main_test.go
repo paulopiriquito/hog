@@ -874,7 +874,7 @@ func TestLoadPluginConfig_WithoutForwardBlock_LeavesEmpty(t *testing.T) {
 }
 
 func TestHandleCallback_WithForwardConfig_PopulatesHeaders(t *testing.T) {
-	mockUserinfoJSON := `{"sub":"abc","email":"a@b.com","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`
+	mockUserinfoJSON := `{"sub":"abc","email":"a@b.com","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`
 
 	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -905,7 +905,7 @@ func TestHandleCallback_WithForwardConfig_PopulatesHeaders(t *testing.T) {
 		Forward: forward.Config{Headers: []forward.Header{
 			{Claim: "sub", Name: "X-User-Id"},
 			{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
-				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
 			}},
 		}},
 	}
@@ -931,7 +931,7 @@ func TestHandleCallback_WithForwardConfig_PopulatesHeaders(t *testing.T) {
 	data, err := session.DecryptSessionCookie(encryptedValue, cfg.Config.SessionKey)
 	require.NoError(t, err)
 	assert.Equal(t, "abc", data.Headers["X-User-Id"])
-	assert.Equal(t, "KRONOS-USER", data.Headers["X-User-Roles"])
+	assert.Equal(t, "APP-USER", data.Headers["X-User-Roles"])
 }
 
 // makeTestJWT produces an unsigned JWT with a far-future exp claim.
@@ -977,7 +977,7 @@ func TestInjectAuthorizationHeader_ForwardMode_EmitsConfiguredHeadersOnly(t *tes
 		JWT: jwt,
 		Headers: map[string]string{
 			"X-User-Id":    "abc",
-			"X-User-Roles": "KRONOS-USER,GITHUB-MEMBER",
+			"X-User-Roles": "APP-USER,GITHUB-MEMBER",
 		},
 	}, key)
 	require.NoError(t, err)
@@ -1001,7 +1001,7 @@ func TestInjectAuthorizationHeader_ForwardMode_EmitsConfiguredHeadersOnly(t *tes
 	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
 
 	assert.Equal(t, "abc", capturedHeaders.Get("X-User-Id"))
-	assert.Equal(t, "KRONOS-USER,GITHUB-MEMBER", capturedHeaders.Get("X-User-Roles"))
+	assert.Equal(t, "APP-USER,GITHUB-MEMBER", capturedHeaders.Get("X-User-Roles"))
 	// Default-mode headers not auto-emitted when forward mode is active
 	// (unless declared & set):
 	assert.Empty(t, capturedHeaders.Get("X-User-Email"))
@@ -1033,7 +1033,7 @@ func makeTestJWTWithClaims(t *testing.T, payloadJSON string) string {
 func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.T) {
 	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"sub":"abc","email":"a@b.com","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`))
+		w.Write([]byte(`{"sub":"abc","email":"a@b.com","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`))
 	}))
 	defer mockIdP.Close()
 	saved := oidcConfig
@@ -1049,7 +1049,7 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 			{Claim: "sub", Name: "X-User-Id"},
 			// X-User-Roles opts into mapped under the JSON-friendly key "roles".
 			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
-				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
 			}},
 		}},
 	}
@@ -1081,7 +1081,7 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 	roles, ok := mapped["roles"].([]any)
 	require.True(t, ok, "expected mapped[\"roles\"] to be an array")
 	require.Len(t, roles, 1)
-	assert.Equal(t, "KRONOS-USER", roles[0])
+	assert.Equal(t, "APP-USER", roles[0])
 
 	// Cookie refreshed with wire headers (independent of As).
 	var refreshed string
@@ -1094,7 +1094,7 @@ func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.
 	data, err := session.DecryptSessionCookie(refreshed, key)
 	require.NoError(t, err)
 	assert.Equal(t, "abc", data.Headers["X-User-Id"])
-	assert.Equal(t, "KRONOS-USER", data.Headers["X-User-Roles"])
+	assert.Equal(t, "APP-USER", data.Headers["X-User-Roles"])
 }
 
 func TestHandleUserInfo_WithoutForwardConfig_PassesThrough(t *testing.T) {
@@ -1273,7 +1273,7 @@ func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
 	// array (even with a single element).
 	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"sub":"abc","memberof":["cn=PT-LM-ROLE-KRONOS-USER,ou=app"]}`))
+		w.Write([]byte(`{"sub":"abc","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`))
 	}))
 	defer mockIdP.Close()
 	saved := oidcConfig
@@ -1286,7 +1286,7 @@ func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
 		Forward: forward.Config{Headers: []forward.Header{
 			{Claim: "sub", Name: "X-User-Id", As: "userId"},
 			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
-				{From: "cn=PT-LM-ROLE-KRONOS-USER,", To: "KRONOS-USER"},
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
 			}},
 		}},
 	}
@@ -1324,7 +1324,7 @@ func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
 	rawRoles := string(mapped["roles"])
 	assert.True(t, strings.HasPrefix(rawRoles, "[") && strings.HasSuffix(rawRoles, "]"),
 		"array source must emit a JSON array, got: %s", rawRoles)
-	assert.Equal(t, `["KRONOS-USER"]`, rawRoles,
+	assert.Equal(t, `["APP-USER"]`, rawRoles,
 		"unexpected JSON shape for mapped.roles")
 }
 

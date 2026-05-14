@@ -136,8 +136,9 @@ The plugin can be configured to project any property from the IdP's `/userinfo` 
         "header": "X-User-Roles",
         "as":     "roles",
         "mapping": [
-          { "from": "cn=PT-LM-ROLE-KRONOS-USER,", "to": "KRONOS-USER" },
-          { "from": "cn=GLOBAL-ROLE-GITHUB-",     "to": "GITHUB-MEMBER" }
+          { "from": "cn=PT-XP-ROLE-APP-USER,",  "to": "APP-USER" },
+          { "from": "cn=PT-XP-ROLE-APP-ADMIN,", "to": "APP-ADMIN" },
+          { "from": "cn=GLOBAL-ROLE-GITHUB,",   "to": "GITHUB-MEMBER" }
         ]
       }
     ]
