@@ -1,16 +1,15 @@
-go 1.25.3
+go 1.26.3
 
 use (
 	.
-	plugins/static-content
-	plugins/authenticator
 	pkg/headers
-	pkg/paths
 	pkg/logging
-	pkg/session
+	pkg/paths
 	pkg/pluginlogger
+	pkg/session
+	plugins/authenticator
+	plugins/static-content
+	tests/e2e
 )
 
-replace (
-	github.com/krakend/krakend-gologging/v2 v2.1.1 => ./pkg/logging
-)
+replace github.com/krakend/krakend-gologging/v2 v2.1.1 => ./pkg/logging

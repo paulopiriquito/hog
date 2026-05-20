@@ -294,9 +294,14 @@ func TestHandleSimpleAuthAlreadyAuthenticated(t *testing.T) {
 
 	config := createValidConfig()
 
+	// Build a valid-format JWT with a far-future exp so ValidateJWTBasic passes
+	jwtHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	jwtPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123","name":"Test User","exp":9999999999}`))
+	validJWT := jwtHeader + "." + jwtPayload + ".signature"
+
 	// Create encrypted session cookie
 	sessionData := session.SessionData{
-		JWT:       "test.jwt.token",
+		JWT:       validJWT,
 		SessionID: "session-123",
 	}
 	encryptedCookie, err := session.EncryptSessionCookie(sessionData, config.Config.SessionKey)
@@ -822,4 +827,98 @@ func TestVerifyStatelessStateExpired(t *testing.T) {
 	_, err := verifyStatelessState(expiredState, sessionKey)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "state expired")
+}
+
+func TestHandleSimpleAuthExpiredSessionRestartsFlow(t *testing.T) {
+	mockLog := &mockLogger{}
+	logger = mockLog
+
+	config := createValidConfig()
+	oidcConfig = &OIDCConfig{
+		AuthorizationEndpoint: "http://dex:5556/auth",
+	}
+
+	// Build an expired JWT (exp in the past)
+	jwtHeader := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
+	jwtPayload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123","exp":1}`)) // exp=1 is long past
+	expiredJWT := jwtHeader + "." + jwtPayload + ".signature"
+
+	sessionData := session.SessionData{
+		JWT:       expiredJWT,
+		SessionID: "old-session",
+	}
+	encryptedCookie, err := session.EncryptSessionCookie(sessionData, config.Config.SessionKey)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/simple-auth?redirect=/protected", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	rr := httptest.NewRecorder()
+
+	handleSimpleAuth(config, rr, req)
+
+	// Must NOT return 200 (would cause infinite redirect loop)
+	// Must redirect to IdP (302) to start a fresh auth flow
+	assert.Equal(t, http.StatusFound, rr.Code)
+	location := rr.Header().Get("Location")
+	assert.Contains(t, location, "dex:5556/auth", "should redirect to IdP, not back to the protected resource")
+	assert.NotEqual(t, "/protected", location, "must not redirect straight back to the protected resource")
+}
+
+func TestHandlePkceInit(t *testing.T) {
+	mockLog := &mockLogger{}
+	logger = mockLog
+
+	config := createValidConfig()
+	oidcConfig = &OIDCConfig{
+		AuthorizationEndpoint: "http://dex:5556/auth",
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/pkce-init?code_challenge=abc123&redirect_uri=http://localhost:3000/callback&state=csrf-token", nil)
+	rr := httptest.NewRecorder()
+
+	handlePkceInit(config, rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var response map[string]string
+	err := json.NewDecoder(rr.Body).Decode(&response)
+	require.NoError(t, err)
+
+	authURL := response["authorization_url"]
+	assert.Contains(t, authURL, "dex:5556/auth")
+	assert.Contains(t, authURL, "code_challenge=abc123")
+	assert.Contains(t, authURL, "code_challenge_method=S256")
+	assert.Contains(t, authURL, "redirect_uri=http")
+	assert.Contains(t, authURL, "state=csrf-token")
+	assert.Contains(t, authURL, "response_type=code")
+}
+
+func TestHandlePkceInitMissingParams(t *testing.T) {
+	config := createValidConfig()
+	oidcConfig = &OIDCConfig{AuthorizationEndpoint: "http://dex:5556/auth"}
+
+	// Missing code_challenge
+	req := httptest.NewRequest(http.MethodGet, "/oauth/pkce-init?redirect_uri=http://localhost/cb", nil)
+	rr := httptest.NewRecorder()
+	handlePkceInit(config, rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+	// Missing redirect_uri
+	req = httptest.NewRequest(http.MethodGet, "/oauth/pkce-init?code_challenge=abc123", nil)
+	rr = httptest.NewRecorder()
+	handlePkceInit(config, rr, req)
+	assert.Equal(t, http.StatusBadRequest, rr.Code)
+}
+
+func TestHandlePkceInitNoState(t *testing.T) {
+	config := createValidConfig()
+	oidcConfig = &OIDCConfig{AuthorizationEndpoint: "http://dex:5556/auth"}
+
+	req := httptest.NewRequest(http.MethodGet, "/oauth/pkce-init?code_challenge=abc123&redirect_uri=http://localhost/cb", nil)
+	rr := httptest.NewRecorder()
+	handlePkceInit(config, rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var response map[string]string
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&response))
+	assert.NotContains(t, response["authorization_url"], "state=")
 }

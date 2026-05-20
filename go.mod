@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog
 
-go 1.25.3
+go 1.26
 
 require (
 	github.com/gin-gonic/gin v1.9.1
@@ -36,6 +36,7 @@ require (
 	github.com/krakend/krakend-usage/v2 v2.1.0
 	github.com/krakend/krakend-xml/v2 v2.2.0
 	github.com/luraproject/lura/v2 v2.12.1
+	github.com/paulopiriquito/hog/pkg/headers v0.0.0-20260114223717-d9be2cdcaff0
 	github.com/spf13/cobra v1.8.1
 	github.com/xeipuuv/gojsonschema v1.2.1-0.20200424115421-065759f9c3d7
 	golang.org/x/sync v0.18.0
@@ -269,7 +270,7 @@ require (
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/oauth2 v0.27.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
