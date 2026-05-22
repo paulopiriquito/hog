@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/paulopiriquito/hog/pkg/forward"
 	"github.com/paulopiriquito/hog/pkg/session"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -216,21 +218,6 @@ func TestSessionCookieDecryptionInvalidData(t *testing.T) {
 
 	_, err = session.DecryptSessionCookie("dG9vc2hvcnQ=", sessionKey)
 	assert.Error(t, err)
-}
-
-func TestExtractSubFromJWT(t *testing.T) {
-	// Valid JWT with sub claim (eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMyIsIm5hbWUiOiJUZXN0IFVzZXIifQ.signature)
-	jwt := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyLTEyMyIsIm5hbWUiOiJUZXN0IFVzZXIifQ.signature"
-	sub := extractSubFromJWT(jwt)
-	assert.Equal(t, "user-123", sub)
-}
-
-func TestExtractSubFromJWTInvalid(t *testing.T) {
-	sub := extractSubFromJWT("invalid.jwt")
-	assert.Equal(t, "unknown", sub)
-
-	sub = extractSubFromJWT("invalid")
-	assert.Equal(t, "unknown", sub)
 }
 
 func TestExtractUserClaimsFromJWT(t *testing.T) {
@@ -605,17 +592,20 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 
 	config := createValidConfig()
 
-	// Create a JWT with user claims (sub, email, name)
-	// JWT format: header.payload.signature
+	// Create a JWT (used only for the Authorization header now)
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"HS256","typ":"JWT"}`))
-	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123","email":"user@example.com","name":"Test User"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"user-123"}`))
 	testJWT := header + "." + payload + ".signature"
 
-	// Create encrypted session cookie
+	// Create encrypted session cookie. Identity claims now live in
+	// dedicated Sub/Email/Name fields rather than being parsed from JWT
+	// on each request.
 	sessionData := session.SessionData{
 		JWT:       testJWT,
-		Identity:  testJWT,
 		SessionID: "session-123",
+		Sub:       "user-123",
+		Email:     "user@example.com",
+		Name:      "Test User",
 	}
 	encryptedCookie, err := session.EncryptSessionCookie(sessionData, config.Config.SessionKey)
 	require.NoError(t, err)
@@ -646,7 +636,7 @@ func TestInjectAuthorizationHeader(t *testing.T) {
 	assert.Equal(t, "user-123", capturedUserId)
 	assert.Equal(t, "user@example.com", capturedUserEmail)
 	assert.Equal(t, "Test User", capturedUserName)
-	assert.Contains(t, mockLog.debugLogs[0], "Injected auth headers for session_id=")
+	assert.Contains(t, mockLog.debugLogs[0], "Injected default identity headers session_id=")
 }
 
 func TestInjectAuthorizationHeaderNoCookie(t *testing.T) {
@@ -822,4 +812,613 @@ func TestVerifyStatelessStateExpired(t *testing.T) {
 	_, err := verifyStatelessState(expiredState, sessionKey)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "state expired")
+}
+
+func TestLoadPluginConfig_WithValidForwardBlock(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{
+				"issuer":        "http://localhost",
+				"client-id":     "x",
+				"client-secret": "y",
+			},
+			"forward": map[string]interface{}{
+				"headers": []interface{}{
+					map[string]interface{}{"claim": "sub", "header": "X-User-Id"},
+					map[string]interface{}{
+						"claim":  "memberof",
+						"header": "X-User-Roles",
+						"mapping": []interface{}{
+							map[string]interface{}{"from": "cn=A,", "to": "A"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pc, err := loadPluginConfig(cfg)
+	require.NoError(t, err)
+	require.Len(t, pc.Forward.Headers, 2)
+	assert.Equal(t, "X-User-Id", pc.Forward.Headers[0].Name)
+	assert.Equal(t, "memberof", pc.Forward.Headers[1].Claim)
+	require.Len(t, pc.Forward.Headers[1].Mapping, 1)
+	assert.Equal(t, "A", pc.Forward.Headers[1].Mapping[0].To)
+}
+
+func TestLoadPluginConfig_RejectsInvalidForwardBlock(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{"issuer": "http://localhost", "client-id": "x", "client-secret": "y"},
+			"forward": map[string]interface{}{
+				"headers": []interface{}{
+					map[string]interface{}{"claim": "sub"}, // missing header
+				},
+			},
+		},
+	}
+	_, err := loadPluginConfig(cfg)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid forward config")
+}
+
+func TestLoadPluginConfig_WithoutForwardBlock_LeavesEmpty(t *testing.T) {
+	cfg := map[string]interface{}{
+		pluginName: map[string]interface{}{
+			"idp": map[string]interface{}{"issuer": "http://localhost", "client-id": "x", "client-secret": "y"},
+		},
+	}
+	pc, err := loadPluginConfig(cfg)
+	require.NoError(t, err)
+	assert.Len(t, pc.Forward.Headers, 0)
+}
+
+func TestHandleCallback_WithForwardConfig_PopulatesHeaders(t *testing.T) {
+	mockUserinfoJSON := `{"sub":"abc","email":"a@b.com","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`
+
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			jwt := makeTestJWT(t, "abc")
+			fmt.Fprintf(w, `{"id_token":%q,"access_token":%q}`, jwt, jwt)
+		case "/userinfo":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(mockUserinfoJSON))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockIdP.Close()
+
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{
+		TokenEndpoint:    mockIdP.URL + "/token",
+		UserinfoEndpoint: mockIdP.URL + "/userinfo",
+	}
+
+	cfg := PluginConfig{
+		Idp:    Idp{ClientId: "c", ClientSecret: "s"},
+		Config: Config{SessionKey: "12345678901234567890123456789012", CallbackUrl: "/cb", SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles", Mapping: []forward.Rule{
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
+			}},
+		}},
+	}
+
+	state, err := createStatelessStateWithRedirect("verifier", "", cfg.Config.SessionKey)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/cb?code=x&state="+state, nil)
+	w := httptest.NewRecorder()
+	handleCallback(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var encryptedValue string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			encryptedValue = c.Value
+			break
+		}
+	}
+	require.NotEmpty(t, encryptedValue, "expected session cookie set")
+	data, err := session.DecryptSessionCookie(encryptedValue, cfg.Config.SessionKey)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Headers["X-User-Id"])
+	assert.Equal(t, "APP-USER", data.Headers["X-User-Roles"])
+}
+
+// makeTestJWT produces an unsigned JWT with a far-future exp claim.
+func makeTestJWT(t *testing.T, sub string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payloadJSON := fmt.Sprintf(`{"sub":%q,"exp":%d}`, sub, time.Now().Add(time.Hour).Unix())
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	return header + "." + payload + ".sig"
+}
+
+func TestInjectAuthorizationHeader_DefaultMode_SetsXUserHeaders(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt,
+		Sub: "abc", Email: "a@b.com", Name: "A B",
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", capturedHeaders.Get("X-User-Id"))
+	assert.Equal(t, "a@b.com", capturedHeaders.Get("X-User-Email"))
+	assert.Equal(t, "A B", capturedHeaders.Get("X-User-Name"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Roles"))
+}
+
+func TestInjectAuthorizationHeader_ForwardMode_EmitsConfiguredHeadersOnly(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt,
+		Headers: map[string]string{
+			"X-User-Id":    "abc",
+			"X-User-Roles": "APP-USER,GITHUB-MEMBER",
+		},
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles"},
+		}},
+	}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", capturedHeaders.Get("X-User-Id"))
+	assert.Equal(t, "APP-USER,GITHUB-MEMBER", capturedHeaders.Get("X-User-Roles"))
+	// Default-mode headers not auto-emitted when forward mode is active
+	// (unless declared & set):
+	assert.Empty(t, capturedHeaders.Get("X-User-Email"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Name"))
+}
+
+func TestInjectAuthorizationHeader_NoCookie_NoHeadersSet(t *testing.T) {
+	cfg := PluginConfig{Config: Config{SessionKey: "12345678901234567890123456789012", SessionCookieName: "auth_session"}}
+	req := httptest.NewRequest("GET", "/anything", nil)
+
+	var capturedHeaders http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedHeaders = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, capturedHeaders.Get("Authorization"))
+	assert.Empty(t, capturedHeaders.Get("X-User-Id"))
+}
+
+// makeTestJWTWithClaims builds an unsigned JWT whose payload is the literal JSON given.
+func makeTestJWTWithClaims(t *testing.T, payloadJSON string) string {
+	t.Helper()
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(payloadJSON))
+	return header + "." + payload + ".sig"
+}
+
+func TestHandleUserInfo_WithForwardConfig_EnrichesAndRefreshesCookie(t *testing.T) {
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc","email":"a@b.com","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			// X-User-Id is forwarded to backends but NOT published to mapped
+			// (no As) — the SPA can read "sub" from the raw IdP fields.
+			{Claim: "sub", Name: "X-User-Id"},
+			// X-User-Roles opts into mapped under the JSON-friendly key "roles".
+			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
+			}},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	mapped, ok := body["mapped"].(map[string]any)
+	require.True(t, ok, "expected mapped field")
+
+	// Only the As-opted entry should appear in mapped.
+	require.Len(t, mapped, 1, "mapped should contain only the As-opted entry, got %v", mapped)
+	_, hasOldKey := mapped["X-User-Id"]
+	assert.False(t, hasOldKey, "X-User-Id (no As) must not appear in mapped")
+
+	roles, ok := mapped["roles"].([]any)
+	require.True(t, ok, "expected mapped[\"roles\"] to be an array")
+	require.Len(t, roles, 1)
+	assert.Equal(t, "APP-USER", roles[0])
+
+	// Cookie refreshed with wire headers (independent of As).
+	var refreshed string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			refreshed = c.Value
+		}
+	}
+	require.NotEmpty(t, refreshed)
+	data, err := session.DecryptSessionCookie(refreshed, key)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Headers["X-User-Id"])
+	assert.Equal(t, "APP-USER", data.Headers["X-User-Roles"])
+}
+
+func TestHandleUserInfo_WithoutForwardConfig_PassesThrough(t *testing.T) {
+	idpBody := `{"sub":"abc","email":"a@b.com"}`
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(idpBody))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{JWT: jwt, SessionID: "sid"}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	assert.JSONEq(t, idpBody, string(body))
+}
+
+func TestHandleCallback_PopulatesIdentityFieldsAtLogin(t *testing.T) {
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		// id_token payload with sub/email/name.
+		jwt := makeTestJWTWithClaims(t, `{"sub":"abc","email":"a@b.com","name":"A B","exp":`+
+			fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix())+`}`)
+		fmt.Fprintf(w, `{"id_token":%q,"access_token":%q}`, jwt, jwt)
+	}))
+	defer mockIdP.Close()
+
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{TokenEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Idp:    Idp{ClientId: "c", ClientSecret: "s"},
+		Config: Config{SessionKey: key, CallbackUrl: "/cb", SessionCookieName: "auth_session"},
+	}
+
+	state, err := createStatelessStateWithRedirect("verifier", "", key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/cb?code=x&state="+state, nil)
+	w := httptest.NewRecorder()
+	handleCallback(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var encrypted string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			encrypted = c.Value
+		}
+	}
+	require.NotEmpty(t, encrypted)
+	data, err := session.DecryptSessionCookie(encrypted, key)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Sub)
+	assert.Equal(t, "a@b.com", data.Email)
+	assert.Equal(t, "A B", data.Name)
+}
+
+func TestHandleUserInfo_RefreshPreservesPriorClaimsOnPartialResponse(t *testing.T) {
+	// Mock IdP whose userinfo response only returns sub (no email/name).
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc"}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		Sub: "abc", Email: "prior@example.com", Name: "Prior Name",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var refreshed string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			refreshed = c.Value
+		}
+	}
+	require.NotEmpty(t, refreshed)
+	data, err := session.DecryptSessionCookie(refreshed, key)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Sub)
+	assert.Equal(t, "prior@example.com", data.Email, "Email must survive a partial userinfo response")
+	assert.Equal(t, "Prior Name", data.Name, "Name must survive a partial userinfo response")
+}
+
+func TestHandleUserInfo_RefreshUpdatesClaimsOnFullResponse(t *testing.T) {
+	// Mock IdP whose userinfo response returns NEW sub/email/name values.
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc","email":"new@example.com","name":"New Name"}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		Sub: "abc", Email: "old@example.com", Name: "Old Name",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var refreshed string
+	for _, c := range resp.Cookies() {
+		if c.Name == "auth_session" {
+			refreshed = c.Value
+		}
+	}
+	require.NotEmpty(t, refreshed)
+	data, err := session.DecryptSessionCookie(refreshed, key)
+	require.NoError(t, err)
+	assert.Equal(t, "abc", data.Sub)
+	assert.Equal(t, "new@example.com", data.Email, "Email should update when userinfo provides a fresh value")
+	assert.Equal(t, "New Name", data.Name, "Name should update when userinfo provides a fresh value")
+}
+
+func TestHandleUserInfo_EnrichedMappedFieldOnWireShape(t *testing.T) {
+	// Verifies the raw JSON byte shape of the /oauth/userinfo response
+	// for the `mapped` field — not just the post-decode Go types. Locks
+	// the SPA contract: scalar source → scalar JSON; array source → JSON
+	// array (even with a single element).
+	mockIdP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"sub":"abc","memberof":["cn=PT-XP-ROLE-APP-USER,ou=app"]}`))
+	}))
+	defer mockIdP.Close()
+	saved := oidcConfig
+	defer func() { oidcConfig = saved }()
+	oidcConfig = &OIDCConfig{UserinfoEndpoint: mockIdP.URL}
+
+	key := "12345678901234567890123456789012"
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id", As: "userId"},
+			{Claim: "memberof", Name: "X-User-Roles", As: "roles", Mapping: []forward.Rule{
+				{From: "cn=PT-XP-ROLE-APP-USER,", To: "APP-USER"},
+			}},
+		}},
+	}
+
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid", Sub: "abc",
+	}, key)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest("GET", "/oauth/userinfo", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	w := httptest.NewRecorder()
+	handleUserInfo(cfg, w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Decode just one level, leaving `mapped` and its children as raw JSON.
+	var top map[string]json.RawMessage
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&top))
+	require.Contains(t, top, "mapped")
+
+	var mapped map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(top["mapped"], &mapped))
+
+	// Scalar source (sub) MUST serialize as a JSON string.
+	require.Contains(t, mapped, "userId")
+	assert.Equal(t, `"abc"`, string(mapped["userId"]),
+		"scalar source must emit a JSON string, not an array")
+
+	// Array source (memberof) MUST serialize as a JSON array — even though
+	// only one element matched the mapping rules.
+	require.Contains(t, mapped, "roles")
+	rawRoles := string(mapped["roles"])
+	assert.True(t, strings.HasPrefix(rawRoles, "[") && strings.HasSuffix(rawRoles, "]"),
+		"array source must emit a JSON array, got: %s", rawRoles)
+	assert.Equal(t, `["APP-USER"]`, rawRoles,
+		"unexpected JSON shape for mapped.roles")
+}
+
+func TestInjectAuthorizationHeader_ForwardMode_StripsClientHeadersWithoutComputedValue(t *testing.T) {
+	// Regression: a logged-in client must not be able to spoof a configured
+	// forward header whose computed value is absent from sessionData.Headers
+	// (e.g. user has no matching role → X-User-Roles is not in the cookie).
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		Headers: map[string]string{"X-User-Id": "abc"},
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{
+		Config: Config{SessionKey: key, SessionCookieName: "auth_session"},
+		Forward: forward.Config{Headers: []forward.Header{
+			{Claim: "sub", Name: "X-User-Id"},
+			{Claim: "memberof", Name: "X-User-Roles"},
+		}},
+	}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	// Client tries to spoof a configured header that has no computed value.
+	req.Header.Set("X-User-Roles", "ADMIN")
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Equal(t, "abc", captured.Get("X-User-Id"), "computed value must reach the backend")
+	assert.Empty(t, captured.Get("X-User-Roles"),
+		"client-sent X-User-Roles must be stripped when the cookie has no computed value for it")
+}
+
+func TestInjectAuthorizationHeader_DefaultMode_StripsClientHeadersWhenSessionFieldsEmpty(t *testing.T) {
+	// Regression: in default mode, when the cookie's Sub/Email/Name are empty
+	// (e.g. a cookie issued before identity caching), the guarded Set does not
+	// fire. The unconditional Del ensures the client cannot inject those
+	// headers either.
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		// Sub/Email/Name intentionally empty.
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+	req.Header.Set("X-User-Id", "admin")
+	req.Header.Set("X-User-Email", "admin@example.com")
+	req.Header.Set("X-User-Name", "Spoofed Admin")
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, captured.Get("X-User-Id"), "client-sent X-User-Id must be stripped when session has no Sub")
+	assert.Empty(t, captured.Get("X-User-Email"), "client-sent X-User-Email must be stripped when session has no Email")
+	assert.Empty(t, captured.Get("X-User-Name"), "client-sent X-User-Name must be stripped when session has no Name")
+}
+
+func TestInjectAuthorizationHeader_NoLongerEmitsIdentityHeader(t *testing.T) {
+	key := "12345678901234567890123456789012"
+	jwt := makeTestJWT(t, "abc")
+	encryptedCookie, err := session.EncryptSessionCookie(session.Data{
+		JWT: jwt, SessionID: "sid",
+		Sub: "abc", Email: "a@b.com", Name: "A B",
+	}, key)
+	require.NoError(t, err)
+
+	cfg := PluginConfig{Config: Config{SessionKey: key, SessionCookieName: "auth_session"}}
+
+	req := httptest.NewRequest("GET", "/anything", nil)
+	req.AddCookie(&http.Cookie{Name: "auth_session", Value: encryptedCookie})
+
+	var captured http.Header
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = r.Header.Clone()
+	})
+	injectAuthorizationHeader(cfg, httptest.NewRecorder(), req, next)
+
+	assert.Empty(t, captured.Get("Identity"), "the Identity header must no longer be emitted")
+	// Sanity-check: default-mode identity headers still come through.
+	assert.Equal(t, "abc", captured.Get("X-User-Id"))
+	assert.Equal(t, "a@b.com", captured.Get("X-User-Email"))
+	assert.Equal(t, "A B", captured.Get("X-User-Name"))
 }

@@ -40,22 +40,15 @@ func isSecureRequest(r *http.Request) bool {
 	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
 }
 
-// SetSessionCookie creates and sets an encrypted session cookie
-func SetSessionCookie(
-	w http.ResponseWriter, r *http.Request, config CookieConfig, idToken string, accessToken string, sessionID string,
-) error {
-	sessionData := SessionData{
-		JWT:       accessToken,
-		Identity:  idToken,
-		SessionID: sessionID,
-	}
-
-	encryptedCookie, err := EncryptSessionCookie(sessionData, config.SessionKey)
+// SetSessionCookie encrypts the given SessionData and sets it as a cookie on the response.
+// Cookie max-age is derived from the JWT (access token) expiration claim.
+func SetSessionCookie(w http.ResponseWriter, r *http.Request, config CookieConfig, data SessionData) error {
+	encryptedCookie, err := EncryptSessionCookie(data, config.SessionKey)
 	if err != nil {
 		return err
 	}
 
-	maxAge := CalculateMaxAge(accessToken)
+	maxAge := CalculateMaxAge(data.JWT)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     GetCookieName(config.CookieName),

@@ -104,6 +104,26 @@
           "hog-authenticator": {
             "idp": {
               "type": "oidc"
+            },
+            "config": {
+              "scopes": "openid email profile groups"
+            },
+            "forward": {
+              "headers": [
+                { "claim": "sub",   "header": "X-User-Id" },
+                { "claim": "email", "header": "X-User-Email" },
+                { "claim": "name",  "header": "X-User-Name" },
+                {
+                  "claim":  "groups",
+                  "header": "X-User-Roles",
+                  "as":     "roles",
+                  "mapping": [
+                    { "from": "cn=PT-XP-ROLE-APP-USER,",                    "to": "APP-USER" },
+                    { "from": "cn=PT-XP-ROLE-APP-ADMIN,",                   "to": "APP-ADMIN" },
+                    { "from": "cn=GLOBAL-ROLE-GITHUB,",                "to": "GITHUB-MEMBER" }
+                  ]
+                }
+              ]
             }
           }
         }
@@ -246,12 +266,12 @@
         {
             "endpoint": "/protected/userinfo",
             "method": "GET",
-            "input_headers": ["Authorization", "Cookie", "X-User-Id", "X-User-Email", "X-User-Name"],
+            "input_headers": ["Authorization", "Cookie", "X-User-Id", "X-User-Email", "X-User-Name", "X-User-Roles"],
             "backend": [
                 {
                     "host": [ "http://dex:5556" ],
                     "url_pattern": "/userinfo",
-                    "input_headers": ["Authorization", "X-User-Id", "X-User-Email", "X-User-Name"]
+                    "input_headers": ["Authorization", "X-User-Id", "X-User-Email", "X-User-Name", "X-User-Roles"]
                 }
             ],
             "extra_config": {
