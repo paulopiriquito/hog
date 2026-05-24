@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/google/uuid"
+	"github.com/paulopiriquito/hog/pkg/forward"
 	"github.com/paulopiriquito/hog/pkg/headers"
 	"github.com/paulopiriquito/hog/pkg/pluginlogger"
 	"github.com/paulopiriquito/hog/pkg/session"
@@ -168,8 +169,9 @@ func (r registerer) registerHandlers(ctx context.Context, extra map[string]inter
 }
 
 type PluginConfig struct {
-	Idp    Idp    `mapstructure:"idp"`
-	Config Config `mapstructure:"config"`
+	Idp     Idp            `mapstructure:"idp"`
+	Config  Config         `mapstructure:"config"`
+	Forward forward.Config `mapstructure:"forward"`
 }
 
 type Idp struct {
@@ -263,6 +265,12 @@ func loadPluginConfig(cfg map[string]interface{}) (PluginConfig, error) {
 		pc.Config.SessionKey = randomKey
 		os.Setenv("AUTH_COOKIE_KEY", randomKey)
 		logger.Warning("No session key configured, generated random key and set AUTH_COOKIE_KEY environment variable")
+	}
+
+	if len(pc.Forward.Headers) > 0 {
+		if err := pc.Forward.Validate(); err != nil {
+			return pc, fmt.Errorf("invalid forward config: %w", err)
+		}
 	}
 
 	return pc, nil
@@ -520,13 +528,23 @@ func handleCallback(config PluginConfig, w http.ResponseWriter, r *http.Request)
 	idToken := token["id_token"].(string)
 	accessToken := token["access_token"].(string)
 
-	// Extract sub from JWT for audit logging
-	sub := extractSubFromJWT(idToken)
+	claims := session.ExtractUserClaimsFromJWT(idToken)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
-	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
+	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
 
-	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
+	fwdHeaders, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	if fwdErr != nil {
+		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
+	}
+
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
+		JWT:       accessToken,
+		SessionID: sessionID,
+		Sub:       claims.Sub,
+		Email:     claims.Email,
+		Name:      claims.Name,
+		Headers:   fwdHeaders,
+	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -586,12 +604,24 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	idToken := token["id_token"].(string)
 	accessToken := token["access_token"].(string)
 
-	sub := extractSubFromJWT(idToken)
+	claims := session.ExtractUserClaimsFromJWT(idToken)
 	sessionMaxAge := session.CalculateMaxAge(accessToken)
-	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", sub, sessionID, sessionMaxAge))
+	logger.Info(fmt.Sprintf("Token exchange successful sub=%s session_id=%s session_max_age=%d", claims.Sub, sessionID, sessionMaxAge))
+
+	fwdHeaders, fwdErr := computeForwardHeaders(r.Context(), accessToken, sessionID, config.Forward)
+	if fwdErr != nil {
+		logger.Warning(fmt.Sprintf("forward.userinfo fetch failed during login session_id=%s error=%v", sessionID, fwdErr))
+	}
 
 	// Encrypt and set cookie
-	if err := session.SetSessionCookie(w, r, getCookieConfig(config), idToken, accessToken, sessionID); err != nil {
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), session.Data{
+		JWT:       accessToken,
+		SessionID: sessionID,
+		Sub:       claims.Sub,
+		Email:     claims.Email,
+		Name:      claims.Name,
+		Headers:   fwdHeaders,
+	}); err != nil {
 		logger.Error(fmt.Sprintf("Failed to set session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -614,55 +644,72 @@ func handleUserInfo(config PluginConfig, w http.ResponseWriter, r *http.Request)
 
 	logger.Debug(fmt.Sprintf("Userinfo request session_id=%s", sessionData.SessionID))
 
-	// Call IdP's userinfo endpoint
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, oidcConfig.UserinfoEndpoint, nil)
+	rawBody, parsed, err := fetchUserInfoRaw(r.Context(), sessionData.JWT)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to create userinfo request: %v", err))
-		http.Error(w, "Internal server error", http.StatusInternalServerError)
-		return
-	}
-
-	req.Header.Set("Authorization", "Bearer "+sessionData.JWT)
-
-	// Inject trace headers for distributed tracing
-	traceFormat := os.Getenv("TRACE_FORMAT")
-	if traceFormat == "" {
-		traceFormat = headers.TraceFormatOTEL
-	}
-	headers.InjectTraceHeaders(r.Context(), req, traceFormat)
-
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to fetch userinfo: %v", err))
-		http.Error(w, "Failed to fetch user info", http.StatusInternalServerError)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Warning(fmt.Sprintf("Userinfo endpoint returned status %d, clearing session cookie session_id=%s", resp.StatusCode, sessionData.SessionID))
-
-		// Clear the invalid session cookie
+		logger.Warning(fmt.Sprintf("Userinfo fetch failed, terminating session session_id=%s error=%v", sessionData.SessionID, err))
 		session.ClearSessionCookie(w, r, config.Config.SessionCookieName)
-
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to read userinfo response: %v", err))
+	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sessionData.Sub, sessionData.SessionID))
+
+	if len(config.Forward.Headers) == 0 || parsed == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(rawBody)
+		return
+	}
+
+	res := forward.Apply(parsed, config.Forward)
+	emitForwardDiagnostics(res.Diagnostics, sessionData.SessionID)
+	logger.Info(fmt.Sprintf("forward.headers refreshed session_id=%s headers_emitted=%d", sessionData.SessionID, len(res.Headers)))
+
+	refreshed := refreshIdentityFromUserinfo(*sessionData, parsed)
+	refreshed.Headers = res.Headers
+	if err := session.SetSessionCookie(w, r, getCookieConfig(config), refreshed); err != nil {
+		logger.Error(fmt.Sprintf("Failed to refresh session cookie: %v", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	sub := extractSubFromJWT(sessionData.Identity)
-	logger.Info(fmt.Sprintf("Userinfo retrieved sub=%s session_id=%s", sub, sessionData.SessionID))
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+	if err := json.NewEncoder(w).Encode(buildEnrichedResponse(parsed, res.Mapped)); err != nil {
+		logger.Error(fmt.Sprintf("Failed to encode enriched userinfo: %v", err))
+	}
+}
+
+// refreshIdentityFromUserinfo returns a session.Data with Sub/Email/Name pulled
+// from the fresh userinfo response. Missing fields preserve the prior values —
+// a flaky IdP returning a partial response must not clobber what we already cached.
+func refreshIdentityFromUserinfo(prior session.Data, parsed map[string]any) session.Data {
+	pick := func(key, fallback string) string {
+		if s, ok := parsed[key].(string); ok && s != "" {
+			return s
+		}
+		return fallback
+	}
+	return session.Data{
+		JWT:       prior.JWT,
+		SessionID: prior.SessionID,
+		Sub:       pick("sub", prior.Sub),
+		Email:     pick("email", prior.Email),
+		Name:      pick("name", prior.Name),
+	}
+}
+
+// buildEnrichedResponse merges raw IdP fields with the SPA-facing mapped object.
+// mapped is omitted from the response when empty (no As-opted entries).
+func buildEnrichedResponse(parsed map[string]any, mapped map[string]any) map[string]any {
+	out := make(map[string]any, len(parsed)+1)
+	for k, v := range parsed {
+		out[k] = v
+	}
+	if len(mapped) > 0 {
+		out["mapped"] = mapped
+	}
+	return out
 }
 
 // Handler: Logout
@@ -728,11 +775,9 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
-		// No session cookie, pass through to next handler
 		next.ServeHTTP(w, r)
 		return
 	}
-
 	sessionData, err := session.DecryptSessionCookie(cookie.Value, config.Config.SessionKey)
 	if err != nil {
 		logger.Debug(fmt.Sprintf("Cookie decryption failed: %v", err))
@@ -740,25 +785,42 @@ func injectAuthorizationHeader(config PluginConfig, w http.ResponseWriter, r *ht
 		return
 	}
 
-	// Extract user claims from JWT
-	userClaims := session.ExtractUserClaimsFromJWT(sessionData.Identity)
-
-	// Inject Authorization header
 	r.Header.Set("Authorization", "Bearer "+sessionData.JWT)
-	r.Header.Set("Identity", sessionData.Identity)
 
-	// Inject user identity headers
-	if userClaims.Sub != "" && userClaims.Sub != "unknown" {
-		r.Header.Set("X-User-Id", userClaims.Sub)
-	}
-	if userClaims.Email != "" {
-		r.Header.Set("X-User-Email", userClaims.Email)
-	}
-	if userClaims.Name != "" {
-		r.Header.Set("X-User-Name", userClaims.Name)
+	if len(config.Forward.Headers) > 0 {
+		// Strip any client-sent values for configured forward headers before
+		// emitting the computed values: prevents an authenticated client from
+		// spoofing a header whose computed value is absent (e.g. user has no
+		// matching role → X-User-Roles is not in sessionData.Headers).
+		for _, h := range config.Forward.Headers {
+			r.Header.Del(h.Name)
+		}
+		for name, value := range sessionData.Headers {
+			r.Header.Set(name, value)
+		}
+		logger.Debug(fmt.Sprintf("Injected forward headers count=%d session_id=%s path=%s",
+			len(sessionData.Headers), sessionData.SessionID, r.URL.Path))
+	} else {
+		// Strip default-mode header names unconditionally, then re-set only
+		// when the cached struct fields are populated. Closes the spoofing
+		// window for cookies issued before identity claims were cached
+		// (those decode with empty Sub/Email/Name).
+		r.Header.Del("X-User-Id")
+		r.Header.Del("X-User-Email")
+		r.Header.Del("X-User-Name")
+		if sessionData.Sub != "" && sessionData.Sub != "unknown" {
+			r.Header.Set("X-User-Id", sessionData.Sub)
+		}
+		if sessionData.Email != "" {
+			r.Header.Set("X-User-Email", sessionData.Email)
+		}
+		if sessionData.Name != "" {
+			r.Header.Set("X-User-Name", sessionData.Name)
+		}
+		logger.Debug(fmt.Sprintf("Injected default identity headers session_id=%s path=%s",
+			sessionData.SessionID, r.URL.Path))
 	}
 
-	logger.Debug(fmt.Sprintf("Injected auth headers for session_id=%s path=%s", sessionData.SessionID, r.URL.Path))
 	next.ServeHTTP(w, r)
 }
 
@@ -806,12 +868,34 @@ func exchangeCodeForToken(ctx context.Context, config PluginConfig, code, verifi
 	return result, nil
 }
 
-// Helper: Extract sub from JWT (for audit logging only, no validation)
-// Using shared session package for JWT parsing
+// computeForwardHeaders fetches userinfo and applies the forward config, returning
+// the wire-headers map for storage in the session cookie. Returns nil if cfg has
+// no headers configured.
+func computeForwardHeaders(ctx context.Context, accessToken, sessionID string, cfg forward.Config) (map[string]string, error) {
+	if len(cfg.Headers) == 0 {
+		return nil, nil
+	}
+	userinfo, err := fetchUserInfo(ctx, accessToken)
+	if err != nil {
+		return nil, err
+	}
+	res := forward.Apply(userinfo, cfg)
+	emitForwardDiagnostics(res.Diagnostics, sessionID)
+	logger.Info(fmt.Sprintf("forward.headers extracted session_id=%s headers_emitted=%d", sessionID, len(res.Headers)))
+	return res.Headers, nil
+}
 
-func extractSubFromJWT(jwt string) string {
-	claims := session.ExtractUserClaimsFromJWT(jwt)
-	return claims.Sub
+func emitForwardDiagnostics(diags []forward.Diagnostic, sessionID string) {
+	for _, d := range diags {
+		switch d.Reason {
+		case forward.ReasonMissingClaim:
+			logger.Debug(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s session_id=%s", d.Reason, d.Claim, d.Header, sessionID))
+		case forward.ReasonWrongType:
+			logger.Warning(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s session_id=%s", d.Reason, d.Claim, d.Header, sessionID))
+		case forward.ReasonNoMatches:
+			logger.Info(fmt.Sprintf("forward.header skipped reason=%s claim=%s header=%s samples=%v session_id=%s", d.Reason, d.Claim, d.Header, d.Samples, sessionID))
+		}
+	}
 }
 
 // Helper: Get cookie config from plugin config

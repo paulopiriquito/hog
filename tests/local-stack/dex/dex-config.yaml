@@ -27,3 +27,10 @@ staticPasswords:
     hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
     username: "test"
     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    groups:
+      # Application-role groups (match the forward.headers mapping rules).
+      - "cn=PT-XP-ROLE-APP-USER,ou=applicationRole,o=corp"
+      - "cn=PT-XP-ROLE-APP-ADMIN,ou=applicationRole,o=corp"
+      - "cn=GLOBAL-ROLE-GITHUB,ou=applicationRole,o=corp"
+      # Noise group (no matching rule, must be filtered out).
+      - "cn=PT-XP-HEADOFFICE,ou=people,o=corp"
