@@ -88,7 +88,7 @@
             "static": [
               {
                 "path-prefix": "/static/*",
-                "service-host": "http://localhost:3000",
+                "service-host": "http://e2e-web:80",
                 "auth": false
               },
               {
