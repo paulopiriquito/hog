@@ -22,9 +22,13 @@ DESC := High
 MAINTAINER := Paulo Piriquito
 DOCKER_WDIR := /tmp/fpm
 DOCKER_FPM := paulopiriquito/fpm
-GOLANG_VERSION := 1.26.3
+GOLANG_VERSION := 1.26
 GLIBC_VERSION := $(shell sh find_glibc.sh)
 ALPINE_VERSION := 3.21
+# Builder base image. golang is not published as -alpine${ALPINE_VERSION} for
+# every alpine release (e.g. golang:1.26-alpine3.21 does not exist), so use the
+# floating -alpine tag; the runtime stage still pins alpine:${ALPINE_VERSION}.
+GOLANG_IMAGE := golang:${GOLANG_VERSION}-alpine
 OS_TAG :=
 EXTRA_LDFLAGS :=
 
@@ -114,7 +118,7 @@ build_on_docker: docker-builder-linux
 
 # Build the container using the Dockerfile (alpine)
 docker:
-	docker build --no-cache --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} --build-arg KRAKEND_VERSION=${VERSION} -t ghcr.io/paulopiriquito/hog:${HOG_VERSION} .
+	docker build --no-cache --build-arg GOLANG_IMAGE=${GOLANG_IMAGE} --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} --build-arg KRAKEND_VERSION=${VERSION} -t ghcr.io/paulopiriquito/hog:${HOG_VERSION} .
 
 docker-builder:
 	docker build --no-cache --build-arg GOLANG_VERSION=${GOLANG_VERSION} --build-arg ALPINE_VERSION=${ALPINE_VERSION} -t ghcr.io/paulopiriquito/hog/builder:${HOG_VERISION} -f Dockerfile-builder .
