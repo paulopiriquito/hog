@@ -442,8 +442,7 @@ func startReporter(ctx context.Context, logger logging.Logger, cfg config.Servic
 		serverID := uuid.NewV4().String()
 		logger.Debug(logPrefix, "Registering usage stats for Cluster ID", clusterID)
 
-		s := audit.Parse(&cfg)
-		a, _ := audit.Marshal(&s)
+		a, _ := audit.Marshal(new(audit.Parse(&cfg)))
 		if err := usage.Report(
 			ctx,
 			usage.Options{
