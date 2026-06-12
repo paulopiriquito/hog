@@ -22,7 +22,8 @@
         "tags": {
           "env": "dev",
           "service": "gateway",
-          "version": "v1.0.0"
+          "version": "v1.0.0",
+          "instance": "$HOSTNAME"
         }
       },
       "telemetry/opentelemetry": {

@@ -144,7 +144,7 @@ func ConfigGetter(e config.ExtraConfig) interface{} {
 		cfg.Tags = make(map[string]string)
 		for key, value := range v {
 			if strValue, ok := value.(string); ok {
-				cfg.Tags[key] = strValue
+				cfg.Tags[key] = resolveEnvRef(strValue)
 			}
 		}
 	}
@@ -282,6 +282,22 @@ func parseSyslogFacility(name string) syslog.Priority {
 	default:
 		return defaultSyslogFacility
 	}
+}
+
+// resolveEnvRef resolves a tag value that references an environment variable.
+// Values of the form "$VAR" or "${VAR}" are replaced with os.Getenv("VAR")
+// (empty string when the variable is unset); any other value is returned
+// unchanged. This lets logging tags carry per-deployment fields sourced from
+// the environment, e.g. {"region": "$AWS_REGION", "version": "$HOG_VERSION"}.
+func resolveEnvRef(v string) string {
+	if len(v) < 2 || v[0] != '$' {
+		return v
+	}
+	name := v[1:]
+	if name[0] == '{' && name[len(name)-1] == '}' {
+		name = name[1 : len(name)-1]
+	}
+	return os.Getenv(name)
 }
 
 func buildJsonPatternWithTags(tags map[string]string) string {
