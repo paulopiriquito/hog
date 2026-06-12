@@ -132,8 +132,6 @@ type AgentStarter interface {
 
 // ExecutorBuilder is a composable builder. Every injected property is used by the NewCmdExecutor method.
 type ExecutorBuilder struct {
-	// PluginLoader is deprecated: Use PluginLoaderWithContext
-	PluginLoader                PluginLoader
 	PluginLoaderWithContext     PluginLoaderWithContext
 	LoggerFactory               LoggerFactory
 	SubscriberFactoriesRegister SubscriberFactoriesRegister
@@ -260,9 +258,6 @@ func (e *ExecutorBuilder) NewCmdExecutor(ctx context.Context) cmd.Executor {
 }
 
 func (e *ExecutorBuilder) checkCollaborators() {
-	if e.PluginLoader == nil {
-		e.PluginLoader = new(pluginLoader)
-	}
 	if e.PluginLoaderWithContext == nil {
 		e.PluginLoaderWithContext = new(pluginLoader)
 	}
