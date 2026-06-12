@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog
 
-go 1.26
+go 1.26.3
 
 require (
 	github.com/gin-gonic/gin v1.9.1
@@ -220,7 +220,6 @@ require (
 	github.com/spf13/cast v1.6.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stoewer/go-strcase v1.2.0 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/tinylib/msgp v1.1.8 // indirect
 	github.com/tmthrgd/atomics v0.0.0-20190904060638-dc7a5fcc7e0d // indirect
 	github.com/tmthrgd/go-bitset v0.0.0-20190904054048-394d9a556c05 // indirect

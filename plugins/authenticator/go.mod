@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog/plugins/hog-authenticator
 
-go 1.25.3
+go 1.26.3
 
 require (
 	github.com/go-viper/mapstructure/v2 v2.4.0
