@@ -44,8 +44,9 @@ services:
       # Session Configuration
       - AUTH_COOKIE_KEY=abcdefghijklmnopqrstuvwxyz123456
       - AUTH_COOKIE_NAME=auth_session
-      # Trace Configuration
-      - TRACE_FORMAT=otel
+      # Trace Configuration — "both" emits W3C trace_id (OpenObserve) AND
+      # dd.trace_id/dd.span_id (Datadog log-trace correlation) in every log line.
+      - TRACE_FORMAT=both
       - OTEL_SERVICE_NAME=hog-gateway
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf

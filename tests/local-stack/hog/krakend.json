@@ -18,7 +18,7 @@
         "format": "json",
         "access_log": true,
         "skip_paths": ["/__health", "/__debug"],
-        "trace_format": "otel",
+        "trace_format": "both",
         "tags": {
           "env": "dev",
           "service": "gateway",
