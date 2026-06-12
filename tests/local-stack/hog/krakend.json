@@ -32,8 +32,8 @@
         "metric_reporting_period": 30,
         "exporters": {
           "otlp": [{
-            "name": "grafana-alloy",
-            "host": "alloy",
+            "name": "otel-collector",
+            "host": "otel-collector",
             "port": 4317,
             "use_http": false,
             "disable_metrics": false,

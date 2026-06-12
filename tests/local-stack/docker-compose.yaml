@@ -47,7 +47,7 @@ services:
       # Trace Configuration
       - TRACE_FORMAT=otel
       - OTEL_SERVICE_NAME=hog-gateway
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
     depends_on:
       dex:
@@ -68,91 +68,43 @@ services:
       - hog-network
 
   # =============================================================================
-  # Observability Stack
+  # OTEL-native Observability (OpenTelemetry Collector -> OpenObserve)
   # =============================================================================
 
-  # Grafana Alloy - Unified telemetry collector (replaces OTEL Collector)
-  alloy:
-    image: grafana/alloy:latest
+  # OpenTelemetry Collector (contrib) - receives OTLP from hog, forwards to
+  # OpenObserve with the Basic-auth header OpenObserve's ingest requires.
+  otel-collector:
+    image: docker.io/otel/opentelemetry-collector-contrib:0.154.0
     restart: always
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector/config.yaml:/etc/otelcol/config.yaml:ro
     ports:
       - "4317:4317"   # OTLP gRPC receiver
       - "4318:4318"   # OTLP HTTP receiver
-      - "12345:12345" # Alloy UI
-    volumes:
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
+    depends_on:
+      openobserve:
+        condition: service_started
     networks:
       - hog-network
 
-  # Grafana Tempo - Distributed tracing backend
-  tempo:
-    image: grafana/tempo:latest
+  # OpenObserve - single-binary OTEL-native backend + UI for traces & metrics.
+  # UI/login at http://localhost:5080 (root@example.com / Complexpass123).
+  openobserve:
+    image: public.ecr.aws/zinclabs/openobserve:v0.14.7
     restart: always
     ports:
-      - "3200:3200"   # Tempo query API
-      - "9095:9095"   # gRPC
-    volumes:
-      - ./tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
-      - tempo-data:/var/tempo
-    command:
-      - -config.file=/etc/tempo/tempo.yaml
-    networks:
-      - hog-network
-
-  # Grafana Loki - Log aggregation
-  loki:
-    image: grafana/loki:latest
-    restart: always
-    ports:
-      - "3100:3100"   # Loki API
-    volumes:
-      - ./loki/loki.yaml:/etc/loki/loki.yaml:ro
-      - loki-data:/var/loki
-    command:
-      - -config.file=/etc/loki/loki.yaml
-    networks:
-      - hog-network
-
-  # Prometheus - Metrics storage
-  prometheus:
-    image: prom/prometheus:latest
-    restart: always
-    ports:
-      - "9090:9090"   # Prometheus UI
-    volumes:
-      - ./prometheus/prometheus.yaml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=24h
-      - --web.enable-remote-write-receiver
-      - --enable-feature=exemplar-storage
-    networks:
-      - hog-network
-
-  # Grafana - Visualization
-  grafana:
-    image: grafana/grafana:latest
-    restart: always
-    ports:
-      - "3001:3000"   # Grafana UI
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
+      - "5080:5080"   # Web UI, query API, and OTLP/HTTP ingest
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
-      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
+      - ZO_ROOT_USER_EMAIL=root@example.com
+      - ZO_ROOT_USER_PASSWORD=Complexpass123
+      - ZO_DATA_DIR=/data
+      # Local testing: flush WAL to searchable storage in ~seconds instead of
+      # the 10-minute default, so traces/metrics show up promptly in the UI.
+      - ZO_FILE_PUSH_INTERVAL=5
+      - ZO_MAX_FILE_RETENTION_TIME=5
+    volumes:
+      - openobserve-data:/data
     networks:
       - hog-network
 
@@ -162,7 +114,4 @@ networks:
 
 volumes:
   dex-data:
-  tempo-data:
-  loki-data:
-  prometheus-data:
-  grafana-data:
+  openobserve-data:
