@@ -27,7 +27,7 @@ A KrakenD HTTP server plugin that proxies requests to static file servers with o
 - **Multiple Upstreams** - Different static servers per path
 - **Optional Auth** - Per-route authentication via `hog-authenticator`
 - **Auto-Redirect** - Unauthenticated users redirected to login, then back to original path
-- **Header Control** - Secure header forwarding (strips sensitive headers by default)
+- **Header Control** - Strips hop-by-hop headers before proxying; opt out with `keep-unsafe-headers`
 
 ## Configuration
 
@@ -193,6 +193,7 @@ When `auth: true` and user is not authenticated:
 
 ## Security Notes
 
-- Headers like `Authorization`, `Cookie`, `X-Forwarded-*` are stripped by default
-- Set `keep-unsafe-headers: true` only for trusted internal services
-- Always use `service-gateway` to exclude API routes from static proxying
+- **Only hop-by-hop headers are stripped** before proxying (`Connection`, `Keep-Alive`, `Proxy-Authenticate`, `Proxy-Authorization`, `Te`, `Trailer`, `Transfer-Encoding`, `Upgrade`). The request's `Authorization` (the `Bearer <jwt>` injected by `hog-authenticator`) and `Cookie` (the session cookie) **are forwarded to the static upstream**, and `X-Forwarded-For` / `X-Forwarded-Host` / `X-Forwarded-Proto` are added. Point `auth: true` routes only at upstreams you trust.
+- `keep-unsafe-headers: true` forwards every header verbatim, including the hop-by-hop ones above. Use only for trusted internal services.
+- The upstream receives the **full request path including the matched prefix** (the prefix is not stripped) — e.g. `/app/index.html` is proxied as `/app/index.html`. The upstream must serve under that prefix, or rewrite it.
+- Use `service-gateway` (or order specific routes before a `/*` catch-all) to keep API routes from being served as static content.
