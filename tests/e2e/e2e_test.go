@@ -32,13 +32,49 @@ import (
 )
 
 const (
-	baseURL      = "http://localhost:3000"
-	dexLoginURL  = "dex:5556"
-	dexEmail     = "test@example.com"
-	dexPassword  = "password"
-	hogContainer = "hog-local-stack-hog-1"
-	apiContainer = "hog-e2e-e2e-api-1"
+	baseURL     = "http://localhost:3000"
+	dexLoginURL = "dex:5556"
+	dexEmail    = "test@example.com"
+	dexPassword = "password"
 )
+
+// Container runtime and names are resolved at startup so the suite runs under
+// both docker-compose (hyphen-joined names, e.g. "hog-local-stack-hog-1") and
+// podman-compose (underscore-joined names, e.g. "hog-local-stack_hog_1").
+var (
+	containerCLI string
+	hogContainer string
+	apiContainer string
+)
+
+func init() {
+	containerCLI, hogContainer = resolveContainer("hog-local-stack-hog-1", "hog-local-stack_hog_1")
+	_, apiContainer = resolveContainer("hog-e2e-e2e-api-1", "hog-e2e_e2e-api_1")
+}
+
+// resolveContainer returns the container runtime (docker or podman, whichever
+// can see the container) and the matching name from the candidates, covering
+// the hyphen/underscore naming difference between docker-compose and
+// podman-compose. If none is found (stack down), it returns an installed CLI
+// and the first candidate so containerLogs degrades gracefully.
+func resolveContainer(candidates ...string) (cli, name string) {
+	for _, c := range []string{"docker", "podman"} {
+		if _, err := exec.LookPath(c); err != nil {
+			continue
+		}
+		for _, n := range candidates {
+			if exec.Command(c, "container", "inspect", n).Run() == nil {
+				return c, n
+			}
+		}
+	}
+	for _, c := range []string{"docker", "podman"} {
+		if _, err := exec.LookPath(c); err == nil {
+			return c, candidates[0]
+		}
+	}
+	return "docker", candidates[0]
+}
 
 // containerLogs streams a container's stdout+stderr into a buffer from the
 // given start time. Call the returned stop function when the test ends.
@@ -47,7 +83,7 @@ func containerLogs(t *testing.T, container string, since time.Time) (*strings.Bu
 	buf := &strings.Builder{}
 	var mu sync.Mutex
 
-	cmd := exec.Command("docker", "logs", "--follow", "--since",
+	cmd := exec.Command(containerCLI, "logs", "--follow", "--since",
 		since.UTC().Format(time.RFC3339), container)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
