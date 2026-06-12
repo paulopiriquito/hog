@@ -249,8 +249,7 @@ func NewIntegration(cfg *Config, cb CmdBuilder, bb BackendBuilder) (*Runner, []T
 	if ok {
 		backend = cbb.NewGenericServer(cfg)
 	} else {
-		httpServer := bb.New(cfg)
-		backend = &httpServer
+		backend = new(bb.New(cfg))
 	}
 
 	closeFuncs = append(closeFuncs, func() { backend.Close() })

@@ -8,12 +8,17 @@ storage:
 web:
   http: 0.0.0.0:5556
 
+oauth2:
+  skipApprovalScreen: true
+
 staticClients:
   - id: krakend
     redirectURIs:
       - 'http://localhost:3000/oauth/callback'
+      - 'http://localhost:3000/oauth/pkce-callback'
     name: 'KrakenD Gateway'
     secret: krakend-secret
+    skipApprovalScreen: true
 
 enablePasswordDB: true
 

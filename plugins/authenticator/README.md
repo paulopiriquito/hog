@@ -81,6 +81,7 @@ When using environment variables, only specify the IdP type:
         "config": {
           "simple-auth-url": "/oauth/simple-auth",
           "token-url": "/oauth/token",
+          "pkce-init-url": "/oauth/pkce-init",
           "callback-url": "/oauth/callback",
           "logout-url": "/oauth/logout",
           "user-info-url": "/oauth/userinfo",
@@ -101,6 +102,7 @@ All `config` fields have sensible defaults:
 |-------|---------|
 | `simple-auth-url` | `/oauth/simple-auth` |
 | `token-url` | `/oauth/token` |
+| `pkce-init-url` | `/oauth/pkce-init` |
 | `callback-url` | `/oauth/callback` |
 | `logout-url` | `/oauth/logout` |
 | `user-info-url` | `/oauth/userinfo` |
@@ -223,15 +225,57 @@ The plugin no longer emits a raw `Identity: <id_token>` header on requests to up
 | Okta                               | `groups`              | Requires `groups` scope and OIDC group claim configuration.    |
 | Auth0                              | Custom-namespaced     | E.g., `https://myapp.com/roles`; depends on Rule/Action setup. |
 
+## Authentication flows
+
+hog supports two login flows. Both end the same way — an encrypted `auth_session`
+cookie that hog turns into an `Authorization: Bearer <jwt>` header on every
+downstream request — but they differ in who drives the OAuth exchange.
+
+### Server-driven (simple-auth) — recommended default
+
+hog owns the whole flow, PKCE included. The browser only follows redirects, so a
+plain `<a href="/oauth/simple-auth">Log in</a>` is enough. This is the flow the
+`hog-static-content` plugin uses to gate protected pages.
+
+```
+1. Browser → GET /oauth/simple-auth[?redirect=/app/dashboard]
+2. hog builds the PKCE pair, signs it into the state token, 302 → IdP login
+3. IdP → 302 /oauth/callback?code&state
+4. hog exchanges the code, sets auth_session, 302 → the redirect path (or JSON)
+```
+
+Pass `?redirect=<path>` to return to a specific page after login; omit it to get a
+JSON `{"status":"authenticated"}` response. A stale or tampered cookie does not
+loop — hog clears it and restarts the flow at the IdP.
+
+### Client-driven PKCE — for SPAs that own their callback
+
+The SPA generates its own `code_verifier` / `code_challenge` and handles the IdP
+redirect itself. hog only sees the verifier at the final exchange.
+
+```
+1. SPA generates verifier + S256 challenge
+2. SPA → GET /oauth/pkce-init?code_challenge=<c>&redirect_uri=<spa-callback>&state=<s>
+        ← { "authorization_url": "https://idp/auth?..." }
+3. SPA navigates the user to authorization_url; IdP → <spa-callback>?code
+4. SPA → POST /oauth/token { code, code_verifier, redirect_uri }
+        ← Set-Cookie: auth_session=...
+5. SPA calls APIs with credentials:'include'
+```
+
+Register the SPA's `redirect_uri` with your IdP. In this flow `state` is the SPA's
+responsibility — hog forwards it to the IdP but does not validate it.
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/oauth/simple-auth` | GET | Initiates login flow (redirects to IdP) |
-| `/oauth/callback` | GET | OAuth callback (handled automatically) |
-| `/oauth/token` | POST | PKCE token exchange for SPAs |
-| `/oauth/userinfo` | GET | Returns user info from IdP |
-| `/oauth/logout` | POST | Clears session cookie |
+| `/oauth/simple-auth` | GET | Server-driven login; redirects to IdP. Accepts `?redirect=<path>` |
+| `/oauth/pkce-init` | GET | Client-driven PKCE; returns `{ authorization_url }` for the SPA to drive |
+| `/oauth/callback` | GET | OAuth callback for the server-driven flow (handled automatically) |
+| `/oauth/token` | POST | PKCE token exchange — body `{ code, code_verifier, redirect_uri }` |
+| `/oauth/userinfo` | GET | Returns userinfo (+ `mapped` roles); refreshes the session cookie |
+| `/oauth/logout` | POST | Clears the session cookie (any method works) |
 
 ## Protected Endpoints with auth/validator
 
@@ -285,6 +329,7 @@ async function fetchData() {
 - **PKCE enabled** - Protects against authorization code interception
 - **Signed state tokens** - Prevents CSRF attacks
 - **Session expiry** - Cookie expires when JWT expires
+- **Cookie attributes** - `HttpOnly` and `SameSite=Lax` (Lax lets the cookie survive the cross-domain IdP redirect; Strict would break it). The `Secure` flag is set when the request arrives over HTTPS, honoring `X-Forwarded-Proto` behind a TLS-terminating proxy
 
 ## Testing
 
@@ -298,4 +343,10 @@ cd tests/local-stack
 podman compose up --build
 # Open http://localhost:3000 (test UI)
 # Open http://localhost:3001 (Grafana observability)
+
+# End-to-end auth flows (headless Chrome via chromedp)
+# Drives simple-auth, expired-session restart, protected API, and client PKCE.
+docker compose -f tests/local-stack/docker-compose.yaml up -d
+docker compose -f tests/e2e/docker-compose.e2e.yaml up --build -d
+cd tests/e2e && GOWORK=off go test -v -timeout 300s .
 ```

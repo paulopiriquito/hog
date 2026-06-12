@@ -36,7 +36,6 @@ import (
 	kotel "github.com/krakend/krakend-otel"
 	otellura "github.com/krakend/krakend-otel/lura"
 	otelgin "github.com/krakend/krakend-otel/router/gin"
-	pubsub "github.com/krakend/krakend-pubsub/v2"
 	usage "github.com/krakend/krakend-usage/v2"
 	"github.com/luraproject/lura/v2/async"
 	"github.com/luraproject/lura/v2/config"
@@ -133,8 +132,6 @@ type AgentStarter interface {
 
 // ExecutorBuilder is a composable builder. Every injected property is used by the NewCmdExecutor method.
 type ExecutorBuilder struct {
-	// PluginLoader is deprecated: Use PluginLoaderWithContext
-	PluginLoader                PluginLoader
 	PluginLoaderWithContext     PluginLoaderWithContext
 	LoggerFactory               LoggerFactory
 	SubscriberFactoriesRegister SubscriberFactoriesRegister
@@ -261,9 +258,6 @@ func (e *ExecutorBuilder) NewCmdExecutor(ctx context.Context) cmd.Executor {
 }
 
 func (e *ExecutorBuilder) checkCollaborators() {
-	if e.PluginLoader == nil {
-		e.PluginLoader = new(pluginLoader)
-	}
 	if e.PluginLoaderWithContext == nil {
 		e.PluginLoaderWithContext = new(pluginLoader)
 	}
@@ -397,7 +391,7 @@ func (m *MetricsAndTraces) Register(ctx context.Context, cfg config.ServiceConfi
 		l.Debug("[SERVICE: InfluxDB] Service correctly registered")
 	}
 
-	if err := opencensus.Register(ctx, cfg, append(opencensus.DefaultViews, pubsub.OpenCensusViews...)...); err != nil {
+	if err := opencensus.Register(ctx, cfg, opencensus.DefaultViews...); err != nil {
 		if err != opencensus.ErrNoConfig {
 			l.Warning("[SERVICE: OpenCensus]", err.Error())
 		}
@@ -443,8 +437,7 @@ func startReporter(ctx context.Context, logger logging.Logger, cfg config.Servic
 		serverID := uuid.NewV4().String()
 		logger.Debug(logPrefix, "Registering usage stats for Cluster ID", clusterID)
 
-		s := audit.Parse(&cfg)
-		a, _ := audit.Marshal(&s)
+		a, _ := audit.Marshal(new(audit.Parse(&cfg)))
 		if err := usage.Report(
 			ctx,
 			usage.Options{

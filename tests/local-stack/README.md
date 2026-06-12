@@ -1,27 +1,30 @@
 # HOG Local Development Stack
 
-Docker-based development environment for HOG gateway with full observability (logs, traces, metrics).
+Docker-based development environment for HOG gateway with OTEL-native
+observability (traces and metrics in OpenObserve; structured JSON logs on stdout).
 
 ## Architecture
 
 ```
-                                    ┌─────────────────────────────────────────────────────────────────┐
-                                    │                    Observability Stack                          │
-┌──────────┐      ┌───────────────┐ │  ┌─────────────┐     ┌───────────┐     ┌──────────────┐        │
-│ Browser  │─────▶│ nginx (:3000) │ │  │ alloy       │────▶│ tempo     │────▶│ grafana      │        │
-└──────────┘      └───────────────┘ │  │ (:4317/4318)│     │ (:3200)   │     │ (:3001)      │        │
-                         │          │  └──────┬──────┘     └───────────┘     └──────────────┘        │
-                         ▼          │         │                  ▲                   ▲               │
-                  ┌─────────────┐   │         │                  │                   │               │
-                  │ hog (:8080) │───┼─────────┼──────────────────┴───────────────────┘               │
-                  │     (:8090) │   │         │                                                       │
-                  └──────┬──────┘   │         ▼                                                       │
-                         │          │  ┌───────────┐     ┌────────────┐                               │
-                  ┌──────▼──────┐   │  │ loki      │     │ prometheus │                               │
-                  │ dex (:5556) │   │  │ (:3100)   │     │ (:9090)    │                               │
-                  │    (IdP)    │   │  └───────────┘     └────────────┘                               │
-                  └─────────────┘   └─────────────────────────────────────────────────────────────────┘
+┌──────────┐      ┌───────────────┐      ┌─────────────┐
+│ Browser  │─────▶│ nginx (:3000) │─────▶│ hog (:8080) │
+└──────────┘      └───────────────┘      └──────┬──────┘
+                  ┌─────────────┐                │ OTLP gRPC (traces, metrics)
+                  │ dex (:5556) │◀── hog          ▼
+                  │    (IdP)    │        ┌──────────────────────┐
+                  └─────────────┘        │ otel-collector       │
+                                         │ (:4317 gRPC/:4318)   │
+                                         └──────────┬───────────┘
+                                                    │ OTLP/HTTP + Basic auth
+                                                    ▼
+                                         ┌──────────────────────┐
+                                         │ openobserve          │
+                                         │ (:5080 UI + API)     │
+                                         └──────────────────────┘
 ```
+
+A thin OpenTelemetry Collector sits in front of OpenObserve because OpenObserve's
+ingest needs a Basic-auth header that KrakenD's own OTLP exporter can't add.
 
 ## Quick Start
 
@@ -33,7 +36,7 @@ podman compose up --build
 
 # Open browser
 open http://localhost:3000      # Test UI
-open http://localhost:3001      # Grafana (admin/admin)
+open http://localhost:5080      # OpenObserve (root@example.com / Complexpass123)
 ```
 
 ## Test Credentials
@@ -58,54 +61,73 @@ open http://localhost:3001      # Grafana (admin/admin)
 
 | Service | Port | Description |
 |---------|------|-------------|
-| grafana | 3001 | Visualization dashboards (admin/admin) |
-| alloy | 4317, 4318 | OTLP gRPC/HTTP receivers |
-| alloy | 12345 | Alloy internal UI |
-| tempo | 3200 | Trace query API |
-| loki | 3100 | Log query API |
-| prometheus | 9090 | Metrics UI |
+| openobserve | 5080 | OTEL-native UI + API for traces & metrics (root@example.com / Complexpass123) |
+| otel-collector | 4317, 4318 | OTLP gRPC/HTTP receivers; forwards to OpenObserve |
 
 ## Observability Features
 
-### Trace-to-Log Correlation
+### Viewing traces & metrics
 
-1. Open Grafana at http://localhost:3001
-2. Navigate to **Explore** → Select **Tempo**
-3. Search for traces by service `hog-gateway`
-4. Click a trace → Click **Logs for this span** to jump to correlated logs
+1. Open OpenObserve at http://localhost:5080 and log in (`root@example.com` / `Complexpass123`).
+2. **Traces** → stream `default` → search/filter by service `hog-gateway`. Click a
+   trace to see its span tree (e.g. `/e2e-api/headers` → proxy → backend).
+3. **Metrics** → streams like `krakend_proxy_duration_*`, `krakend_backend_duration_*`,
+   `http_server_duration_*`.
 
-### Pre-provisioned Dashboard
+Traces and metrics flow `hog → otel-collector → openobserve` over OTLP. Local
+flush is tuned for fast visibility (`ZO_MAX_FILE_RETENTION_TIME=5`), so data
+appears within a few seconds.
 
-Navigate to **Dashboards** → **HOG Gateway** for:
-- Request rate (req/s)
-- Latency percentiles (p50, p95, p99)
-- Error rate
-- Live logs stream
-- Recent traces
+### Trace-to-log correlation
 
-### Direct Log Queries
+hog emits structured JSON access logs on **stdout** with the same `trace_id`
+OpenObserve stores, so you can pivot between them by hand:
 
-```logql
-# All gateway logs
-{job="docker", container=~".*hog.*"} | json
-
-# Filter by trace ID
-{job="docker"} | json | trace_id="<your-trace-id>"
-
-# Errors only
-{job="docker", container=~".*hog.*"} | json | level="ERROR"
+```bash
+# grab a request's trace_id from the gateway logs
+podman compose logs hog | grep '"module":"ACCESS"'
+# {"module":"ACCESS","path":"/e2e-api/headers","trace_id":"257fa7e4...","span_id":"..."}
 ```
+
+Then search that `trace_id` in OpenObserve's Traces view. (Shipping the stdout
+logs into OpenObserve is a planned follow-up; for now logs stay on stdout.)
 
 ## Test Endpoints
 
-| Endpoint | Auth | Description |
-|----------|------|-------------|
-| `/oauth/simple-auth` | No | Start login flow |
-| `/oauth/userinfo` | Cookie | Get user info (plugin) |
-| `/oauth/logout` | Cookie | Clear session |
-| `/protected/userinfo` | JWT | Get user info (via KrakenD validator) |
-| `/protected-static/*` | Cookie | Protected static content |
-| `/static/*` | No | Public static content |
+The OAuth and validator endpoints run on the core stack. The static-content and
+echo-API demos (`/static/*`, `/e2e-static/*`, `/e2e-api/*`) proxy to the
+`e2e-web` / `e2e-api` containers, which live in a **separate compose file** —
+start it alongside the core stack to exercise those routes (see
+[Static-content & API demos](#static-content--api-demos)).
+
+| Endpoint | Auth | Demonstrates | Needs E2E stack |
+|----------|------|--------------|-----------------|
+| `/oauth/simple-auth` | No | Server-driven login (redirects to IdP, then back). Accepts `?redirect=<path>` | — |
+| `/oauth/pkce-init` | No | Client-driven PKCE: returns the IdP `authorization_url` for a SPA to drive itself | — |
+| `/oauth/userinfo` | Cookie | Live userinfo + `mapped` roles from `forward.headers` | — |
+| `/oauth/logout` | Cookie | Clears the session cookie | — |
+| `/protected/userinfo` | JWT | Userinfo behind KrakenD's `auth/validator` | — |
+| `/static/*` | No | Public static content (no cookie required) | yes (`e2e-web`) |
+| `/protected-static/*` | Cookie | Protected static content (echoes via httpbin.org — needs internet) | — |
+| `/e2e-static/*` | Cookie | Protected static content, e.g. `/e2e-static/protected.html` | yes (`e2e-web`) |
+| `/e2e-api/headers` | JWT | Echoes the `X-User-*` / `Authorization` headers hog injects | yes (`e2e-api`) |
+
+### Static-content & API demos
+
+The routes marked **Needs E2E stack** proxy to services defined in
+`tests/e2e/docker-compose.e2e.yaml`. Bring them up on the same network after the
+core stack is running:
+
+```bash
+# core stack first (creates the shared network)
+podman compose -f tests/local-stack/docker-compose.yaml up -d --build
+
+# then the e2e web/api upstreams
+podman compose -f tests/e2e/docker-compose.e2e.yaml up -d --build
+
+# try a protected static page — bounces to Dex login, then serves the page
+open http://localhost:3000/e2e-static/protected.html
+```
 
 ## Configuration Files
 
@@ -114,11 +136,7 @@ Navigate to **Dashboards** → **HOG Gateway** for:
 | `hog/krakend.json` | Gateway configuration |
 | `dex/dex-config.yaml` | IdP configuration |
 | `nginx/nginx.conf` | Reverse proxy config |
-| `alloy/config.alloy` | Telemetry collector config |
-| `tempo/tempo.yaml` | Trace storage config |
-| `loki/loki.yaml` | Log storage config |
-| `prometheus/prometheus.yaml` | Metrics scrape config |
-| `grafana/provisioning/` | Datasources & dashboards |
+| `otel-collector/config.yaml` | OTLP receivers → OpenObserve exporter |
 
 ## Environment Variables
 
@@ -134,40 +152,26 @@ environment:
   # Telemetry
   - TRACE_FORMAT=otel
   - OTEL_SERVICE_NAME=hog-gateway
-  - OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318
+  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 ```
 
 ## Logs
 
-```bash
-# All services
-podman compose logs -f
+hog writes structured JSON logs (with `trace_id`) to stdout — read them with:
 
-# Just hog gateway
+```bash
+# Just the gateway
 podman compose logs -f hog
 
-# Observability stack
-podman compose logs -f alloy tempo loki
+# Only access logs
+podman compose logs hog | grep '"module":"ACCESS"'
+
+# All services
+podman compose logs -f
 ```
 
-### Log Collection for Grafana
-
-Since Podman on macOS doesn't expose a Docker socket, logs must be collected using the helper script:
-
-```bash
-# Start log collector (runs in background, pushes logs to Loki)
-./collect-logs.sh &
-
-# Or run in foreground to see logs
-./collect-logs.sh
-```
-
-The log collector:
-- Tails the HOG container logs
-- Parses JSON fields (level, trace_id, etc.)
-- Pushes to Loki with proper labels for trace correlation
-
-**Note:** Run the log collector after `podman compose up` for logs to appear in Grafana.
+Traces and metrics live in OpenObserve (http://localhost:5080); see
+[Observability Features](#observability-features).
 
 ## Cleanup
 

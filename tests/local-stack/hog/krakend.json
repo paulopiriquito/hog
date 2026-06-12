@@ -18,11 +18,12 @@
         "format": "json",
         "access_log": true,
         "skip_paths": ["/__health", "/__debug"],
-        "trace_format": "otel",
+        "trace_format": "both",
         "tags": {
           "env": "dev",
           "service": "gateway",
-          "version": "v1.0.0"
+          "version": "v1.0.0",
+          "instance": "$HOSTNAME"
         }
       },
       "telemetry/opentelemetry": {
@@ -32,8 +33,8 @@
         "metric_reporting_period": 30,
         "exporters": {
           "otlp": [{
-            "name": "grafana-alloy",
-            "host": "alloy",
+            "name": "otel-collector",
+            "host": "otel-collector",
             "port": 4317,
             "use_http": false,
             "disable_metrics": false,
@@ -88,12 +89,17 @@
             "static": [
               {
                 "path-prefix": "/static/*",
-                "service-host": "http://localhost:3000",
+                "service-host": "http://e2e-web:80",
                 "auth": false
               },
               {
                 "path-prefix": "/protected-static/*",
                 "service-host": "https://httpbin.org",
+                "auth": true
+              },
+              {
+                "path-prefix": "/e2e-static/*",
+                "service-host": "http://e2e-web:80",
                 "auth": true
               }
             ],
@@ -129,6 +135,25 @@
         }
     },
     "endpoints": [
+        {
+            "endpoint": "/e2e-api/headers",
+            "method": "GET",
+            "input_headers": ["Authorization", "X-User-Id", "X-User-Email", "X-User-Name"],
+            "backend": [
+                {
+                    "host": ["http://e2e-api:8000"],
+                    "url_pattern": "/api/headers"
+                }
+            ],
+            "extra_config": {
+                "auth/validator": {
+                    "alg": "RS256",
+                    "audience": ["krakend"],
+                    "jwk_url": "http://dex:5556/keys",
+                    "disable_jwk_security": true
+                }
+            }
+        },
         {
             "endpoint": "/supu",
             "method": "GET",

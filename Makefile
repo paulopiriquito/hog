@@ -8,7 +8,7 @@ BIN_NAME := krakend
 OS := $(shell uname | tr '[:upper:]' '[:lower:]')
 MODULE := github.com/paulopiriquito/hog
 VERSION := 2.12.0
-HOG_VERSION := 1.2.0
+HOG_VERSION := 1.3.0
 SCHEMA_VERSION := $(shell echo "${VERSION}" | cut -d '.' -f 1,2)
 GIT_COMMIT := $(shell git rev-parse --short=7 HEAD)
 PKGNAME := hog
@@ -22,7 +22,7 @@ DESC := High
 MAINTAINER := Paulo Piriquito
 DOCKER_WDIR := /tmp/fpm
 DOCKER_FPM := paulopiriquito/fpm
-GOLANG_VERSION := 1.25.3
+GOLANG_VERSION := 1.26.3
 GLIBC_VERSION := $(shell sh find_glibc.sh)
 ALPINE_VERSION := 3.21
 OS_TAG :=

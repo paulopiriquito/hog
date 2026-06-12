@@ -158,6 +158,10 @@ func (r registerer) registerHandlers(ctx context.Context, extra map[string]inter
 			handleUserInfo(config, writer, request)
 			return
 		}
+		if path == config.Config.PkceInitUrl {
+			handlePkceInit(config, writer, request)
+			return
+		}
 
 		// For all other requests, try to inject Authorization header from session cookie
 		injectAuthorizationHeader(config, writer, request, h)
@@ -184,6 +188,7 @@ type Config struct {
 	CallbackUrl       string `mapstructure:"callback-url"`
 	LogoutUrl         string `mapstructure:"logout-url"`
 	UserInfoUrl       string `mapstructure:"user-info-url"`
+	PkceInitUrl       string `mapstructure:"pkce-init-url"`
 	Scopes            string `mapstructure:"scopes"`
 	SessionKey        string `mapstructure:"session-key"`
 	SessionCookieName string `mapstructure:"session-cookie-name"`
@@ -233,6 +238,9 @@ func loadPluginConfig(cfg map[string]interface{}) (PluginConfig, error) {
 	}
 	if pc.Config.UserInfoUrl == "" {
 		pc.Config.UserInfoUrl = "/oauth/userinfo"
+	}
+	if pc.Config.PkceInitUrl == "" {
+		pc.Config.PkceInitUrl = "/oauth/pkce-init"
 	}
 	if pc.Config.Scopes == "" {
 		pc.Config.Scopes = "openid profile email"
@@ -418,9 +426,9 @@ func handleSimpleAuth(config PluginConfig, w http.ResponseWriter, r *http.Reques
 	// Check for redirect parameter (from static-content plugin)
 	redirectPath := r.URL.Query().Get("redirect")
 
-	// Check if already authenticated
+	// Check if already authenticated with a valid, non-expired session
 	sessionData, err := session.GetSessionFromCookie(r, getCookieConfig(config))
-	if err == nil && sessionData.JWT != "" {
+	if err == nil && sessionData.JWT != "" && session.ValidateJWTBasic(sessionData.JWT) == nil {
 		logger.Info(fmt.Sprintf("User already authenticated session_id=%s", sessionData.SessionID))
 
 		// If redirect parameter is present, redirect to that path
@@ -438,7 +446,8 @@ func handleSimpleAuth(config PluginConfig, w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err == nil {
-		logger.Debug("Existing session cookie invalid or expired")
+		logger.Debug("Existing session cookie invalid or expired, clearing stale cookie")
+		session.ClearSessionCookie(w, r, config.Config.SessionCookieName)
 	}
 
 	// Generate PKCE parameters
@@ -567,6 +576,7 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 	var req struct {
 		Code         string `json:"code"`
 		CodeVerifier string `json:"code_verifier"`
+		RedirectURI  string `json:"redirect_uri"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -575,11 +585,16 @@ func handleTokenExchange(config PluginConfig, w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	redirectURI := req.RedirectURI
+	if redirectURI == "" {
+		redirectURI = getCallbackURL(r, config.Config.CallbackUrl)
+	}
+
 	sessionID := uuid.New().String()
 	logger.Debug(fmt.Sprintf("PKCE token exchange initiated session_id=%s", sessionID))
 
 	// Exchange code for token
-	token, err := exchangeCodeForToken(r.Context(), config, req.Code, req.CodeVerifier, getCallbackURL(r, config.Config.CallbackUrl))
+	token, err := exchangeCodeForToken(r.Context(), config, req.Code, req.CodeVerifier, redirectURI)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Token exchange failed session_id=%s error=%v", sessionID, err))
 		http.Error(w, "Token exchange failed", http.StatusInternalServerError)
@@ -714,6 +729,43 @@ func handleLogout(config PluginConfig, w http.ResponseWriter, r *http.Request) {
 	sendJSONResponse(w, http.StatusOK, map[string]string{
 		"status":  "logged_out",
 		"message": "Logout successful",
+	})
+}
+
+// Handler: PKCE Init — returns the IdP authorization URL for client-driven PKCE flows.
+// The client supplies its own code_challenge and optionally a state token for CSRF protection.
+func handlePkceInit(config PluginConfig, w http.ResponseWriter, r *http.Request) {
+	codeChallenge := r.URL.Query().Get("code_challenge")
+	redirectURI := r.URL.Query().Get("redirect_uri")
+	state := r.URL.Query().Get("state") // optional — client is responsible for CSRF state
+
+	if codeChallenge == "" || redirectURI == "" {
+		http.Error(w, "Missing code_challenge or redirect_uri", http.StatusBadRequest)
+		return
+	}
+
+	authURL, err := url.Parse(oidcConfig.AuthorizationEndpoint)
+	if err != nil {
+		logger.Error(fmt.Sprintf("Failed to parse authorization endpoint: %v", err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	q := authURL.Query()
+	q.Set("client_id", config.Idp.ClientId)
+	q.Set("response_type", "code")
+	q.Set("scope", config.Config.Scopes)
+	q.Set("redirect_uri", redirectURI)
+	q.Set("code_challenge", codeChallenge)
+	q.Set("code_challenge_method", "S256")
+	if state != "" {
+		q.Set("state", state)
+	}
+	authURL.RawQuery = q.Encode()
+
+	logger.Debug("PKCE init — returning authorization URL for client-driven flow")
+	sendJSONResponse(w, http.StatusOK, map[string]string{
+		"authorization_url": authURL.String(),
 	})
 }
 

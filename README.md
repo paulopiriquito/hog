@@ -22,7 +22,7 @@ services:
       - IDP_ISSUER=http://your-idp:5556
       - IDP_CLIENT_ID=your-client
       - IDP_CLIENT_SECRET=your-secret
-      - AUTH_COOKIE_KEY=32-byte-secret-key-here!!!!!
+      - AUTH_COOKIE_KEY=abcdefghijklmnopqrstuvwxyz123456 # must be exactly 32 bytes
     volumes:
       - ./krakend.json:/etc/krakend/krakend.json
     ports:
@@ -75,6 +75,7 @@ Reusable Go packages for extending KrakenD:
 |---------|-------------|
 | [pkg/logging](./pkg/logging/) | Structured logging with trace context and access logs |
 | [pkg/headers](./pkg/headers/) | Header manipulation and trace propagation utilities |
+| [pkg/forward](./pkg/forward/) | Project IdP claims into forwarded headers (filter, rename, map) |
 | [pkg/session](./pkg/session/) | Cookie and JWT session management |
 | [pkg/paths](./pkg/paths/) | URL pattern matching for routing |
 | [pkg/pluginlogger](./pkg/pluginlogger/) | Logger wrapper for KrakenD plugins |
@@ -86,6 +87,7 @@ Reusable Go packages for extending KrakenD:
 - [Authenticator Plugin](./plugins/authenticator/README.md) - Full BFF authentication configuration
 - [Static Content Plugin](./plugins/static-content/README.md) - Static serving with auth options
 - [Local Stack](./tests/local-stack/README.md) - Docker-based testing with Dex IdP and Grafana observability
+- [End-to-End Tests](./tests/e2e/) - Headless-browser tests covering simple-auth, client PKCE, and protected static/API flows
 
 
 This project is not supported by the KrakenD team.

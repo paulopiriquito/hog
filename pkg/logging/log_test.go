@@ -128,6 +128,52 @@ func TestNewLogger_requiredFields(t *testing.T) {
 	}
 }
 
+func TestNewLogger_jsonFormat_resolvesEnvTags(t *testing.T) {
+	t.Setenv("HOG_TEST_REGION", "eu-west-1")
+
+	buff := bytes.NewBuffer(make([]byte, 1024))
+	SetFormatterSelector(func(w io.Writer) string { return ActivePattern })
+
+	extra := map[string]interface{}{
+		Namespace: map[string]interface{}{
+			"level":  "DEBUG",
+			"stdout": true,
+			"format": "json",
+			"tags": map[string]interface{}{
+				"region":  "$HOG_TEST_REGION",   // env ref, bare
+				"zone":    "${HOG_TEST_REGION}", // env ref, braces
+				"service": "hog",                // literal stays literal
+				"missing": "$HOG_TEST_UNSET",    // unset env -> empty string
+			},
+		},
+	}
+
+	logger, err := NewLogger(extra, TestFormatWriter{buff})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Critical(criticalMsg)
+
+	out := strings.ReplaceAll(buff.String(), "\x00", "")
+	js := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(out), &js); err != nil {
+		t.Fatalf("output is not valid json: %v\n%s", err, out)
+	}
+
+	if js["region"] != "eu-west-1" {
+		t.Errorf("bare env ref: want %q, got %q", "eu-west-1", js["region"])
+	}
+	if js["zone"] != "eu-west-1" {
+		t.Errorf("braced env ref: want %q, got %q", "eu-west-1", js["zone"])
+	}
+	if js["service"] != "hog" {
+		t.Errorf("literal tag: want %q, got %q", "hog", js["service"])
+	}
+	if js["missing"] != "" {
+		t.Errorf("unset env ref: want empty string, got %q", js["missing"])
+	}
+}
+
 func TestNewLogger_unknownLevel(t *testing.T) {
 	_, err := NewLogger(newExtraConfig("UNKNOWN", "default", ""), bytes.NewBuffer(make([]byte, 1024)))
 	if err == nil {
