@@ -93,6 +93,22 @@ jobs:
           docker logs hog-local-stack-hog-1 || true
           exit 1
 
+      # The first chromedp browser launch on a cold runner can exceed Chrome's
+      # 20s DevTools-websocket timeout (binary/libs not yet in the OS cache),
+      # which fails the first test while later ones pass. Warm Chrome first so
+      # every test's launch is fast.
+      - name: Warm up Chrome
+        run: |
+          for bin in google-chrome google-chrome-stable chromium-browser chromium; do
+            if command -v "$bin" >/dev/null; then
+              echo "warming $bin ($("$bin" --version 2>/dev/null))"
+              "$bin" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
+                --dump-dom about:blank >/dev/null 2>&1 || true
+              exit 0
+            fi
+          done
+          echo "::warning::no Chrome/Chromium binary found to warm up"
+
       - name: Run E2E tests
         run: cd tests/e2e && GOWORK=off go test -count=1 -v -timeout 300s .
 
