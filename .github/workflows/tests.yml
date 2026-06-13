@@ -1,0 +1,119 @@
+name: Tests
+
+# Runs the Go unit/integration tests and the chromedp end-to-end auth tests on
+# every pull request update (open / push new commits / reopen).
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit & integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Package unit tests
+        run: |
+          go test -count=1 -v ./pkg/headers
+          go test -count=1 -v ./pkg/paths
+          go test -count=1 -v ./pkg/logging
+          go test -count=1 -v ./plugins/static-content
+          go test -count=1 -v ./plugins/authenticator
+
+      # The KrakenD-CE integration suite (./tests) forks the built gateway binary
+      # and asserts on its User-Agent, which embeds core.KrakendVersion — so it
+      # must be built with the version ldflag (matches the Makefile / release).
+      - name: Build gateway binary
+        run: go build -ldflags="-X github.com/luraproject/lura/v2/core.KrakendVersion=2.12.0" -o krakend ./cmd/krakend-ce
+
+      - name: Integration tests
+        run: go test -count=1 -v ./tests
+
+  e2e:
+    name: E2E auth flows (chromedp)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The browser is driven on the runner host and is redirected to the IdP at
+      # http://dex:5556 — so `dex` must resolve to the published port on loopback.
+      - name: Map dex hostname for the browser
+        run: echo "127.0.0.1 dex" | sudo tee -a /etc/hosts
+
+      # Build the gateway image natively (single-arch). The compose hog service
+      # declares multi-arch `platforms`, which the default docker builder can't
+      # build/load locally — so we pre-build and tag it as the compose service
+      # image (<project>-<service>) and bring the stack up without --build.
+      - name: Build hog image
+        run: |
+          docker build \
+            --build-arg GOLANG_IMAGE=golang:1.26-alpine \
+            --build-arg GOLANG_VERSION=1.26 \
+            --build-arg ALPINE_VERSION=3.21 \
+            --build-arg KRAKEND_VERSION=2.12.0 \
+            -t hog-local-stack-hog -t ghcr.io/paulopiriquito/hog:local \
+            -f Dockerfile .
+
+      - name: Start the stack
+        run: |
+          # Core auth stack only (no observability services needed for e2e).
+          docker compose -f tests/local-stack/docker-compose.yaml up -d hog dex nginx
+          # Protected static + echo-API upstreams (attach to the stack network).
+          docker compose -f tests/e2e/docker-compose.e2e.yaml up -d --build
+
+      - name: Wait for hog OIDC discovery
+        run: |
+          for i in $(seq 1 60); do
+            if docker logs hog-local-stack-hog-1 2>&1 | grep -q "OIDC discovery successful"; then
+              echo "hog is ready"; exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::hog did not become ready in time"
+          docker logs hog-local-stack-hog-1 || true
+          exit 1
+
+      # The first chromedp browser launch on a cold runner can exceed Chrome's
+      # 20s DevTools-websocket timeout (binary/libs not yet in the OS cache),
+      # which fails the first test while later ones pass. Warm Chrome first so
+      # every test's launch is fast.
+      - name: Warm up Chrome
+        run: |
+          for bin in google-chrome google-chrome-stable chromium-browser chromium; do
+            if command -v "$bin" >/dev/null; then
+              echo "warming $bin ($("$bin" --version 2>/dev/null))"
+              "$bin" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
+                --dump-dom about:blank >/dev/null 2>&1 || true
+              exit 0
+            fi
+          done
+          echo "::warning::no Chrome/Chromium binary found to warm up"
+
+      - name: Run E2E tests
+        run: cd tests/e2e && GOWORK=off go test -count=1 -v -timeout 300s .
+
+      - name: Stack logs on failure
+        if: failure()
+        run: |
+          docker compose -f tests/local-stack/docker-compose.yaml logs hog dex nginx || true
+          docker compose -f tests/e2e/docker-compose.e2e.yaml logs || true
