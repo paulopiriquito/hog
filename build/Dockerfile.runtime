@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1
+# hog-runtime: secure-by-design, debuggable Alpine runtime base (vanilla hog binary).
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY . .
+ENV GOWORK=off CGO_ENABLED=0
+RUN go build -o /out/hog ./cmd/hog
+
+FROM alpine:3.21 AS hog-runtime
+RUN apk add --no-cache ca-certificates tzdata \
+ && addgroup -g 10001 hog \
+ && adduser -u 10001 -G hog -D -H hog \
+ && mkdir -p /etc/hog /srv/web \
+ && chown -R hog:hog /etc/hog /srv/web
+COPY --from=build /out/hog /usr/local/bin/hog
+# busybox /bin/sh is retained for `docker exec ... sh` debugging.
+LABEL org.opencontainers.image.title="hog" \
+      org.opencontainers.image.source="https://github.com/paulopiriquito/hog"
+EXPOSE 8080
+USER hog:hog
+ENTRYPOINT ["/usr/local/bin/hog", "--config", "/etc/hog"]
+# Stateless: run read-only => docker run --read-only --tmpfs /tmp ...

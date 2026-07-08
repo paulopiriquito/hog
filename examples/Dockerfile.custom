@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+FROM hog-builder AS build
+COPY plugins/ ./plugins/
+COPY gateway.yaml .
+RUN hog-build --config gateway.yaml -o /out/hog
+# For local plugin sources: RUN hog-build --config gateway.yaml -o /out/hog --replace github.com/acme/x=./plugins/x
+
+FROM hog-runtime
+COPY --from=build /out/hog /usr/local/bin/hog
+COPY --chown=hog:hog config/ /etc/hog/
+COPY --chown=hog:hog web/    /srv/web/

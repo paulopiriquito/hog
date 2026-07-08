@@ -1,0 +1,6 @@
+# syntax=docker/dockerfile:1
+# hog-static: hog-runtime pre-configured to serve a SPA from /srv/web out of the box.
+FROM hog-runtime AS hog-static
+COPY --chown=hog:hog build/static/gateway.yaml /etc/hog/gateway.yaml
+COPY --chown=hog:hog build/static/index.html   /srv/web/index.html
+# Operators: FROM hog-static; COPY dist/ /srv/web/   (replaces the placeholder)

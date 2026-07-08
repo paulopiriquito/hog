@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HOG is serving</title>
+<style>
+  :root {
+    --bg: #f1f2ef;
+    --surface: #ffffff;
+    --ink: #1c1f1d;
+    --muted: #6c7269;
+    --accent: #b9812c;
+    --border: #e2e4df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --surface: #1b1e23;
+      --ink: #edeeea;
+      --muted: #8a9098;
+      --accent: #e3ae55;
+      --border: #2a2e35;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100dvh;
+    padding: 1.5rem;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main {
+    width: 100%;
+    max-width: 28rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 1.25rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 16px 40px rgba(0, 0, 0, 0.08);
+    padding: 3rem 2.5rem 2.25rem;
+    text-align: center;
+  }
+  .glyph {
+    width: 3.25rem;
+    height: 3.25rem;
+    color: var(--accent);
+    margin: 0 auto 1.5rem;
+  }
+  .glyph .packet {
+    animation: travel 3.6s ease-in-out infinite;
+  }
+  @keyframes travel {
+    0%   { transform: translateX(0);    opacity: 0; }
+    12%  { opacity: 1; }
+    50%  { transform: translateX(3rem); opacity: 1; }
+    88%  { opacity: 1; }
+    100% { transform: translateX(6rem); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .glyph .packet { animation: none; opacity: 1; transform: translateX(3rem); }
+  }
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 0.75rem;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4.5vw, 2.1rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0 0 0.75rem;
+  }
+  p.sub {
+    color: var(--muted);
+    font-size: 0.95rem;
+    line-height: 1.55;
+    margin: 0 0 1.75rem;
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8125rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 0.7rem 0.9rem;
+  }
+  .status .dot {
+    color: var(--accent);
+  }
+  .status .path {
+    color: var(--muted);
+  }
+  footer {
+    margin-top: 2rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    opacity: 0.75;
+  }
+</style>
+</head>
+<body>
+<main>
+  <svg class="glyph" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M16 50 V24" />
+    <path d="M48 50 V24" />
+    <path d="M16 24 C16 11 48 11 48 24" />
+    <circle class="packet" cx="8" cy="34" r="3" fill="currentColor" stroke="none" />
+  </svg>
+  <p class="eyebrow">HOG &middot; Application Gateway</p>
+  <h1>HOG is serving.</h1>
+  <p class="sub">Nothing is mounted yet. Drop your build into the path below and this page steps aside.</p>
+  <div class="status">
+    <span class="dot">&#9679; ready</span>
+    <span class="path">&rarr; /srv/web</span>
+  </div>
+  <footer>hog &middot; application gateway</footer>
+</main>
+</body>
+</html>
