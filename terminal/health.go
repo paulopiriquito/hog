@@ -1,6 +1,5 @@
-// Package terminal provides built-in terminal (route-final) handlers. The core
-// spine ships only `health`; static/proxy/api/auth/system handlers are added by
-// later specs.
+// Package terminal provides built-in terminal (route-final) handlers: health
+// and static. Proxy/api/auth/system handlers are added by later specs.
 package terminal
 
 import (
@@ -20,4 +19,5 @@ func Register(reg *registry.Registry) {
 			io.WriteString(w, `{"status":"ok"}`)
 		}), nil
 	})
+	registerStatic(reg)
 }

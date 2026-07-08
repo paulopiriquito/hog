@@ -10,10 +10,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// HandlerSpec selects a terminal handler module and carries its config.
+// HandlerSpec selects a terminal handler module and carries its config. Config
+// holds the entire handler mapping node — INCLUDING the `type` key — so the
+// terminal factory can decode handler-specific fields (e.g. dir, cacheControl)
+// from it. Factory config structs must therefore tolerate the extra `type` key
+// (do not enable yaml KnownFields(true) when decoding it).
 type HandlerSpec struct {
-	Type   string    `yaml:"type"`
-	Config yaml.Node `yaml:",inline"`
+	Type   string
+	Config yaml.Node
+}
+
+// UnmarshalYAML captures the handler's type and stores the full mapping node
+// as Config so terminal factories can decode their own fields from it.
+// yaml.Node with ",inline" does not capture remainder fields in gopkg.in/yaml.v3;
+// a custom unmarshaler is required.
+func (h *HandlerSpec) UnmarshalYAML(node *yaml.Node) error {
+	type plain struct {
+		Type string `yaml:"type"`
+	}
+	var p plain
+	if err := node.Decode(&p); err != nil {
+		return err
+	}
+	h.Type = p.Type
+	h.Config = *node
+	return nil
 }
 
 // Route is a single routable endpoint.

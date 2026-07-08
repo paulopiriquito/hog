@@ -48,3 +48,33 @@ spec:
 		t.Fatalf("unmatched policy = %+v, want empty", unmatched)
 	}
 }
+
+func TestParseRouteCapturesHandlerConfig(t *testing.T) {
+	rs, err := config.DecodeAll([]byte(`
+kind: Route
+metadata: { name: spa }
+spec:
+  match: /
+  handler: { type: static, dir: /web, index: app.html }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := ParseRoute(rs[0])
+	if err != nil {
+		t.Fatalf("ParseRoute: %v", err)
+	}
+	if r.Handler.Type != "static" {
+		t.Fatalf("Handler.Type = %q, want static", r.Handler.Type)
+	}
+	var hc struct {
+		Dir   string `yaml:"dir"`
+		Index string `yaml:"index"`
+	}
+	if err := r.Handler.Config.Decode(&hc); err != nil {
+		t.Fatalf("decode Handler.Config: %v", err)
+	}
+	if hc.Dir != "/web" || hc.Index != "app.html" {
+		t.Fatalf("Handler.Config decoded = %+v, want dir=/web index=app.html", hc)
+	}
+}
