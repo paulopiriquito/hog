@@ -19,14 +19,18 @@ func projectPassport(claims []string, idClaims, userinfo map[string]any) map[str
 	return out
 }
 
-// projectGroups filters the userinfo group-DN list to entries matching any
-// configured pattern (case-insensitive substring) and renders each as its cn=
-// value or the whole DN. Order is preserved; results are deduped.
-func projectGroups(cfg *GroupsConfig, userinfo map[string]any) []string {
+// projectGroups filters the group-DN list to entries matching any configured
+// pattern (case-insensitive substring) and renders each as its cn= value or
+// the whole DN. userinfo is preferred; idClaims is the fallback (Bearer
+// tokens carry group claims directly). Order is preserved; results are deduped.
+func projectGroups(cfg *GroupsConfig, userinfo, idClaims map[string]any) []string {
 	if cfg == nil {
 		return nil
 	}
 	raw, ok := userinfo[cfg.Source]
+	if !ok {
+		raw, ok = idClaims[cfg.Source]
+	}
 	if !ok {
 		return nil
 	}

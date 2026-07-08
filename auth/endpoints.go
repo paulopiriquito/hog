@@ -24,12 +24,13 @@ type Handlers struct {
 	sealer *session.Sealer
 	cfg    Config
 	scfg   session.Config
+	idCfg  session.IdentityConfig
 	log    *slog.Logger
 }
 
 // NewHandlers builds the auth endpoint handlers.
-func NewHandlers(i idp.IdP, s session.Manager, sealer *session.Sealer, cfg Config, scfg session.Config) *Handlers {
-	return &Handlers{idp: i, sess: s, sealer: sealer, cfg: cfg, scfg: scfg, log: slog.Default()}
+func NewHandlers(i idp.IdP, s session.Manager, sealer *session.Sealer, cfg Config, scfg session.Config, idCfg session.IdentityConfig) *Handlers {
+	return &Handlers{idp: i, sess: s, sealer: sealer, cfg: cfg, scfg: scfg, idCfg: idCfg, log: slog.Default()}
 }
 
 func randToken() string {
@@ -99,7 +100,7 @@ func (h *Handlers) Callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var userinfo map[string]any
-	if NeedsUserInfo(h.scfg, h.cfg.UserInfo) {
+	if NeedsUserInfo(h.idCfg) {
 		userinfo, err = h.idp.UserInfo(ctx, tokens.AccessToken)
 		if err != nil {
 			h.log.Error("auth: userinfo", "err", err)

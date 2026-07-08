@@ -44,6 +44,9 @@ func (f *fakeIdP) Refresh(ctx context.Context, rt string) (*idp.Tokens, error) {
 func (f *fakeIdP) Verify(ctx context.Context, raw string) (*idp.Identity, error) {
 	return f.exchID, nil
 }
+func (f *fakeIdP) VerifyAccessToken(ctx context.Context, raw string) (*idp.Identity, error) {
+	return f.Verify(ctx, raw)
+}
 func (f *fakeIdP) LogoutURL(hint, redir string) (string, bool) { return "", false }
 func (f *fakeIdP) UserInfo(ctx context.Context, at string) (map[string]any, error) {
 	return f.userinfo, f.uiErr
@@ -68,7 +71,8 @@ func testHandlers(t *testing.T, f *fakeIdP, sessMut func(*session.Config)) (*Han
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandlers(f, m, sealer, Config{LoginPath: "/auth/login", LogoutPath: "/auth/logout", UserInfo: "auto"}, sc)
+	idCfg := session.IdentityConfig{Claims: sc.PassportClaims, Groups: sc.Groups, UserInfo: "auto"}
+	h := NewHandlers(f, m, sealer, Config{LoginPath: "/auth/login", LogoutPath: "/auth/logout"}, sc, idCfg)
 	return h, m, sealer
 }
 

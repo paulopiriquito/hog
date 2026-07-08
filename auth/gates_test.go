@@ -153,3 +153,29 @@ func TestSessionGateTamperedCookieNoPrincipal(t *testing.T) {
 		t.Fatal("tampered cookie must not resolve a principal")
 	}
 }
+
+func TestAuthGateServiceChallengePlain(t *testing.T) {
+	h := chain.Compose(passProbe(), AuthGate(true, false, "/auth/login"))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/x", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.Header().Get("WWW-Authenticate") != "Bearer" {
+		t.Fatalf("challenge = %q, want Bearer", rec.Header().Get("WWW-Authenticate"))
+	}
+}
+
+func TestAuthGateServiceChallengeInvalidToken(t *testing.T) {
+	h := chain.Compose(passProbe(), AuthGate(true, false, "/auth/login"))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/x", nil)
+	req = req.WithContext(withBearerError(req.Context())) // a bearer was present but failed
+	h.ServeHTTP(rec, req)
+	if rec.Header().Get("WWW-Authenticate") != `Bearer error="invalid_token"` {
+		t.Fatalf("challenge = %q", rec.Header().Get("WWW-Authenticate"))
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}

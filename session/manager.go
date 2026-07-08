@@ -47,7 +47,7 @@ func (m *cookieManager) New(idt *idp.Identity, userinfo map[string]any, tok *idp
 	return &Session{
 		Subject:     idt.Subject,
 		Passport:    projectPassport(m.cfg.PassportClaims, idt.Claims, userinfo),
-		Groups:      projectGroups(m.cfg.Groups, userinfo),
+		Groups:      projectGroups(m.cfg.Groups, userinfo, idt.Claims),
 		AccessToken: tok.AccessToken, // tok.RefreshToken intentionally discarded (server-side-only, #5)
 		Expiry:      now.Add(m.cfg.TTL),
 		IssuedAt:    now,

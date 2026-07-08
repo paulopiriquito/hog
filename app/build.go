@@ -133,25 +133,33 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
-	sess, sessCfg, err := buildSession(cfg.Gateway)
+	idCfg, err := session.ParseIdentity(cfg.Gateway.Identity)
 	if err != nil {
 		return nil, err
 	}
-	// Auth gates (BFF #3b): built only when a session manager is configured.
-	var sessionGate chain.Middleware
-	var loginPath, groupsAs string
+	sess, sessCfg, err := buildSession(cfg.Gateway, idCfg)
+	if err != nil {
+		return nil, err
+	}
+	// Identity resolution gates. SessionGate is nil-safe (pass-through when no
+	// cookie manager); the Bearer gate is available whenever an IdP is configured.
+	sessionGate := auth.SessionGate(sess)
+	var bearerGate chain.Middleware
+	if active != nil {
+		bearerGate = auth.BearerGate(active, idCfg, logger)
+	}
+	groupsAs := "groups"
+	if idCfg.Groups != nil && idCfg.Groups.As != "" {
+		groupsAs = idCfg.Groups.As
+	}
+	loginPath := "/auth/login"
 	var authCfg auth.Config
 	if sess != nil {
-		sessionGate = auth.SessionGate(sess)
 		authCfg, err = auth.FromYAML(cfg.Gateway.Auth)
 		if err != nil {
 			return nil, err
 		}
 		loginPath = authCfg.LoginPath
-		groupsAs = "groups"
-		if sessCfg.Groups != nil && sessCfg.Groups.As != "" {
-			groupsAs = sessCfg.Groups.As
-		}
 	}
 	if sess != nil && active == nil {
 		logger.Warn("session configured without an IdP: protected routes will redirect to the login path, but the auth endpoints are not mounted",
@@ -182,15 +190,20 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		if rerr != nil {
 			return nil, rerr
 		}
+		authActive := sess != nil || active != nil
 		var gates chain.Gates
-		if sess != nil {
+		if authActive {
+			slot := sessionGate
+			if resolved.Type == "service" && bearerGate != nil {
+				slot = combine(sessionGate, bearerGate) // cookie (outer) then bearer (inner)
+			}
 			gates = chain.Gates{
-				Session:    sessionGate,
+				Session:    slot,
 				AuthGate:   auth.AuthGate(resolved.Auth == "required", resolved.Type == "app", loginPath),
 				Projection: auth.ProjectionGate(resolved.Projection, groupsAs),
 			}
 		} else if resolved.Auth == "required" {
-			logger.Warn("route requires auth but no session is configured; it will be served WITHOUT enforcement",
+			logger.Warn("route requires auth but neither a session nor an IdP is configured; it will be served WITHOUT enforcement",
 				"route", rt.Name, "match", rt.Match)
 		}
 		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates)...)
@@ -203,7 +216,7 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		if err != nil {
 			return nil, err
 		}
-		h := auth.NewHandlers(active, sess, sealer, authCfg, *sessCfg)
+		h := auth.NewHandlers(active, sess, sealer, authCfg, *sessCfg, idCfg)
 		mux.HandleFunc(authCfg.LoginPath, h.Login)
 		mux.HandleFunc(authCfg.LogoutPath, h.Logout)
 		mux.HandleFunc(callbackPath(cfg.IdPResources), h.Callback)
@@ -231,10 +244,16 @@ func callbackPath(resources []config.Resource) string {
 	return u.Path
 }
 
+// combine runs a (outer) then b (inner) as a single Middleware, so the request
+// flows a → b → next on the way in.
+func combine(a, b chain.Middleware) chain.Middleware {
+	return chain.Func(func(next http.Handler) http.Handler { return a.Wrap(b.Wrap(next)) })
+}
+
 // buildSession constructs the session Manager from the Gateway's raw session
-// block. An absent block ⇒ nil manager (allowed until #3 requires it); a present
-// block with a bad key ⇒ fail-fast.
-func buildSession(g gateway.Settings) (session.Manager, *session.Config, error) {
+// block, applying the identity model (passport claims + groups) from idCfg. An
+// absent block ⇒ nil manager; a present block with a bad key ⇒ fail-fast.
+func buildSession(g gateway.Settings, idCfg session.IdentityConfig) (session.Manager, *session.Config, error) {
 	if g.Session.Kind == 0 {
 		return nil, nil, nil
 	}
@@ -242,6 +261,8 @@ func buildSession(g gateway.Settings) (session.Manager, *session.Config, error) 
 	if err != nil {
 		return nil, nil, err
 	}
+	cfg.PassportClaims = idCfg.Claims
+	cfg.Groups = idCfg.Groups
 	m, err := session.NewManager(cfg)
 	if err != nil {
 		return nil, nil, err

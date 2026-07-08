@@ -21,7 +21,7 @@ type GroupsConfig struct {
 // Config is the validated session configuration.
 type Config struct {
 	CookieName         string
-	Key                []byte        // exactly 32 bytes → AES-256-GCM
+	Key                []byte // exactly 32 bytes → AES-256-GCM
 	TTL                time.Duration
 	FingerprintHeaders []string
 	PassportClaims     []string      // claims to persist (sub always kept; may be empty)
@@ -36,17 +36,8 @@ type rawConfig struct {
 	Key                string   `yaml:"key"`
 	TTL                string   `yaml:"ttl"`
 	FingerprintHeaders []string `yaml:"fingerprintHeaders"`
-	Passport           *struct {
-		Claims *[]string `yaml:"claims"`
-	} `yaml:"passport"`
-	Groups *struct {
-		Source string   `yaml:"source"`
-		Match  []string `yaml:"match"`
-		Render string   `yaml:"render"`
-		As     string   `yaml:"as"`
-	} `yaml:"groups"`
-	InfoPath           string `yaml:"infoPath"`
-	PostLogoutRedirect string `yaml:"postLogoutRedirect"`
+	InfoPath           string   `yaml:"infoPath"`
+	PostLogoutRedirect string   `yaml:"postLogoutRedirect"`
 }
 
 var defaultPassportClaims = []string{"email", "name", "given_name", "family_name"}
@@ -77,23 +68,6 @@ func FromYAML(node yaml.Node) (Config, error) {
 	}
 	if len(cfg.FingerprintHeaders) == 0 {
 		cfg.FingerprintHeaders = []string{"User-Agent"}
-	}
-	if raw.Passport == nil || raw.Passport.Claims == nil {
-		cfg.PassportClaims = append([]string(nil), defaultPassportClaims...)
-	} else {
-		cfg.PassportClaims = *raw.Passport.Claims
-	}
-	if raw.Groups != nil {
-		g := &GroupsConfig{
-			Source: raw.Groups.Source,
-			Match:  raw.Groups.Match,
-			Render: orDefault(raw.Groups.Render, "cn"),
-			As:     orDefault(raw.Groups.As, "groups"),
-		}
-		if g.Render != "cn" && g.Render != "dn" {
-			return Config{}, fmt.Errorf("session: groups.render must be cn or dn (got %q)", g.Render)
-		}
-		cfg.Groups = g
 	}
 	return cfg, nil
 }

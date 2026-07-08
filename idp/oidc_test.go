@@ -225,3 +225,80 @@ func TestPKCEOptional(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestVerifyAccessTokenRejections(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s",
+		RedirectURL: "https://app/cb", BearerAudience: "api-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// expired ⇒ rejected
+	expired := signWith(t, f.priv, f.srv.URL, "api-1", map[string]any{"exp": time.Now().Add(-time.Hour).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), expired); err == nil {
+		t.Fatal("expired access token must be rejected")
+	}
+
+	// wrong issuer ⇒ rejected
+	evilIss := signWith(t, f.priv, "https://evil", "api-1", nil)
+	if _, err := oi.VerifyAccessToken(context.Background(), evilIss); err == nil {
+		t.Fatal("wrong-issuer access token must be rejected")
+	}
+
+	// opaque / non-JWT ⇒ rejected cleanly (error, no panic)
+	if _, err := oi.VerifyAccessToken(context.Background(), "not-a-jwt"); err == nil {
+		t.Fatal("garbage token must be rejected")
+	}
+}
+
+func TestVerifyAccessTokenAudience(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s",
+		RedirectURL: "https://app/cb", BearerAudience: "api-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// aud=api-1 (the configured bearerAudience) ⇒ accepted.
+	good := signWith(t, f.priv, f.srv.URL, "api-1", map[string]any{"email": "a@b.co"})
+	id, err := oi.VerifyAccessToken(context.Background(), good)
+	if err != nil {
+		t.Fatalf("valid access token rejected: %v", err)
+	}
+	if id.Subject != "user-123" {
+		t.Fatalf("subject = %q", id.Subject)
+	}
+
+	// aud=client-1 (wrong audience for bearer) ⇒ rejected.
+	wrong := signWith(t, f.priv, f.srv.URL, "client-1", map[string]any{})
+	if _, err := oi.VerifyAccessToken(context.Background(), wrong); err == nil {
+		t.Fatal("token with wrong audience must be rejected")
+	}
+
+	// bad signature ⇒ rejected.
+	other, _ := rsa.GenerateKey(rand.Reader, 2048)
+	bad := signWith(t, other, f.srv.URL, "api-1", map[string]any{})
+	if _, err := oi.VerifyAccessToken(context.Background(), bad); err == nil {
+		t.Fatal("token with bad signature must be rejected")
+	}
+}
+
+func TestVerifyAccessTokenDefaultAudienceIsClientID(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		// BearerAudience omitted ⇒ defaults to ClientID.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signWith(t, f.priv, f.srv.URL, "client-1", map[string]any{})
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err != nil {
+		t.Fatalf("default-audience token rejected: %v", err)
+	}
+}

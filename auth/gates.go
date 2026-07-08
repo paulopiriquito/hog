@@ -51,6 +51,7 @@ func AuthGate(required, isApp bool, loginPath string) chain.Middleware {
 					if isApp {
 						http.Redirect(w, r, loginRedirectURL(loginPath, r.URL.RequestURI()), http.StatusFound)
 					} else {
+						w.Header().Set("WWW-Authenticate", bearerChallenge(r.Context()))
 						http.Error(w, "unauthorized", http.StatusUnauthorized)
 					}
 					return

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/idp"
@@ -591,5 +595,179 @@ spec:
 	}
 	if rec.Body.String() != "u-1|admins" {
 		t.Fatalf("service projected body = %q, want \"u-1|admins\"", rec.Body.String())
+	}
+}
+
+// registerEchoBearer writes "X-User-Id|X-User-Groups|Authorization" so a test can
+// assert both the projected identity and that the inbound Authorization survived.
+func registerEchoBearer(reg *registry.Registry) {
+	reg.Register(config.KindTerminalHandler, "echo-bearer", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-User-Id")+"|"+r.Header.Get("X-User-Groups")+"|"+r.Header.Get("Authorization"))
+		}), nil
+	})
+}
+
+// newBearerIdP stands up a fake OIDC provider serving a real JWKS + userinfo, and
+// returns its issuer URL and a signer for access tokens (aud defaults to clientID).
+func newBearerIdP(t *testing.T, clientID string) (issuer string, signAccess func(claims map[string]any) string) {
+	t.Helper()
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwks := jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &priv.PublicKey, KeyID: "k1", Algorithm: "RS256", Use: "sig"}}}
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"issuer": srv.URL, "authorization_endpoint": srv.URL + "/a", "token_endpoint": srv.URL + "/t",
+			"jwks_uri": srv.URL + "/jwks", "userinfo_endpoint": srv.URL + "/userinfo",
+			"id_token_signing_alg_values_supported": []string{"RS256"},
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) { _ = json.NewEncoder(w).Encode(jwks) })
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"sub": "user-123", "isMemberOf": []string{"cn=admins,ou=applicationRole"}})
+	})
+	signAccess = func(claims map[string]any) string {
+		c := map[string]any{"iss": srv.URL, "aud": clientID, "sub": "user-123",
+			"iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}
+		for k, v := range claims {
+			c[k] = v
+		}
+		signer, err := jose.NewSigner(
+			jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: priv, KeyID: "k1"}},
+			(&jose.SignerOptions{}).WithType("JWT"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := json.Marshal(c)
+		jws, err := signer.Sign(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s, err := jws.CompactSerialize()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	return srv.URL, signAccess
+}
+
+func TestEnforcementBearerAuthedProjectsCookieless(t *testing.T) {
+	reg := registry.New()
+	registerEchoBearer(reg)
+	idp.Register(reg)
+	iss, signAccess := newBearerIdP(t, "c")
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  identity:
+    claims: [email]
+    groups: { source: isMemberOf, match: [ou=applicationRole], render: cn }
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app/cb }
+---
+kind: Route
+metadata: { name: api }
+spec: { match: /api/, type: service, handler: { type: echo-bearer } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signAccess(map[string]any{"email": "a@b.co", "isMemberOf": []any{"cn=admins,ou=applicationRole"}})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/", nil)
+	req.Header.Set("Authorization", "Bearer "+tok)
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "user-123|admins|Bearer "+tok {
+		t.Fatalf("body = %q (want id|groups|Authorization preserved)", rec.Body.String())
+	}
+}
+
+func TestEnforcementBearerInvalid401(t *testing.T) {
+	reg := registry.New()
+	registerEchoBearer(reg)
+	idp.Register(reg)
+	iss, _ := newBearerIdP(t, "c")
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  identity: { claims: [email] }
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app/cb }
+---
+kind: Route
+metadata: { name: api }
+spec: { match: /api/, type: service, handler: { type: echo-bearer } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/", nil)
+	req.Header.Set("Authorization", "Bearer not-a-jwt")
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if rec.Header().Get("WWW-Authenticate") != `Bearer error="invalid_token"` {
+		t.Fatalf("challenge = %q", rec.Header().Get("WWW-Authenticate"))
+	}
+}
+
+func TestEnforcementAppRouteIgnoresBearer(t *testing.T) {
+	reg := registry.New()
+	registerEchoBearer(reg)
+	idp.Register(reg)
+	iss, signAccess := newBearerIdP(t, "c")
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  identity: { claims: [email] }
+  session: { key: "0123456789abcdef0123456789abcdef" }
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app/auth/callback }
+---
+kind: Route
+metadata: { name: spa, labels: { x: y } }
+spec: { match: /app/, type: app, handler: { type: echo-bearer }, policy: { auth: required } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/app/", nil)
+	req.Header.Set("Authorization", "Bearer "+signAccess(map[string]any{}))
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("app route must ignore Bearer and redirect, got %d", rec.Code)
 	}
 }

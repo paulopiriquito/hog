@@ -77,3 +77,14 @@ func TestFromResourceCapturesAuthBlock(t *testing.T) {
 		t.Fatal("auth block not captured")
 	}
 }
+
+func TestFromResourceCapturesIdentityBlock(t *testing.T) {
+	rs, _ := config.DecodeAll([]byte("kind: Gateway\nmetadata: {name: hog}\nspec:\n  identity:\n    claims: [email]\n"))
+	g, err := FromResource(rs[0])
+	if err != nil {
+		t.Fatalf("FromResource: %v", err)
+	}
+	if g.Identity.Kind == 0 {
+		t.Fatal("identity node not captured")
+	}
+}

@@ -12,21 +12,23 @@ import (
 
 // oidcConfig is the decoded `kind: IdP` spec.
 type oidcConfig struct {
-	Type         string   `yaml:"type"`
-	Issuer       string   `yaml:"issuer"`
-	ClientID     string   `yaml:"clientID"`
-	ClientSecret string   `yaml:"clientSecret"`
-	RedirectURL  string   `yaml:"redirectURL"`
-	Scopes       []string `yaml:"scopes"`
-	PKCE         *bool    `yaml:"pkce"`
+	Type           string   `yaml:"type"`
+	Issuer         string   `yaml:"issuer"`
+	ClientID       string   `yaml:"clientID"`
+	ClientSecret   string   `yaml:"clientSecret"`
+	RedirectURL    string   `yaml:"redirectURL"`
+	BearerAudience string   `yaml:"bearerAudience"`
+	Scopes         []string `yaml:"scopes"`
+	PKCE           *bool    `yaml:"pkce"`
 }
 
 type oidcIdP struct {
-	oauth2     *oauth2.Config
-	verifier   *oidc.IDTokenVerifier
-	endSession string
-	provider   *oidc.Provider
-	pkce       bool
+	oauth2         *oauth2.Config
+	verifier       *oidc.IDTokenVerifier
+	bearerVerifier *oidc.IDTokenVerifier
+	endSession     string
+	provider       *oidc.Provider
+	pkce           bool
 }
 
 func (o *oidcIdP) AuthCodeURL(state, nonce, codeVerifier string) string {
@@ -102,6 +104,21 @@ func (o *oidcIdP) Verify(ctx context.Context, rawJWT string) (*Identity, error) 
 	return identityFrom(idt)
 }
 
+// VerifyAccessToken verifies a Bearer access-token JWT against the IdP's JWKS,
+// checking signature, issuer, expiry, and the bearer audience (default the
+// client ID, overridable via bearerAudience).
+//
+// Caveat: with the default audience (the client ID), an id_token (whose aud is
+// also the client ID) will also pass. Operators wanting strict access-token-only
+// acceptance must configure a distinct bearerAudience.
+func (o *oidcIdP) VerifyAccessToken(ctx context.Context, rawJWT string) (*Identity, error) {
+	idt, err := o.bearerVerifier.Verify(ctx, rawJWT)
+	if err != nil {
+		return nil, fmt.Errorf("oidc: verify access token: %w", err)
+	}
+	return identityFrom(idt)
+}
+
 func (o *oidcIdP) LogoutURL(idTokenHint, postLogoutRedirect string) (string, bool) {
 	if o.endSession == "" {
 		return "", false
@@ -154,6 +171,10 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 		EndSession string `json:"end_session_endpoint"`
 	}
 	_ = provider.Claims(&disco) // end_session is optional
+	bearerAud := cfg.BearerAudience
+	if bearerAud == "" {
+		bearerAud = cfg.ClientID
+	}
 	return &oidcIdP{
 		oauth2: &oauth2.Config{
 			ClientID:     cfg.ClientID,
@@ -162,9 +183,10 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 			RedirectURL:  cfg.RedirectURL,
 			Scopes:       scopes,
 		},
-		verifier:   provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
-		endSession: disco.EndSession,
-		provider:   provider,
-		pkce:       pkce,
+		verifier:       provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		bearerVerifier: provider.Verifier(&oidc.Config{ClientID: bearerAud}),
+		endSession:     disco.EndSession,
+		provider:       provider,
+		pkce:           pkce,
 	}, nil
 }
