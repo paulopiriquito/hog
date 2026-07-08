@@ -47,7 +47,8 @@ re-platforming, not an in-place upgrade.
 
 ## v1 deprecation
 
-- **v1 is deprecated** as of the v2.0.0 release. It receives no new features.
-- v1 remains in the repository under `v1/` as an archive for reference during
-  migration. It is not maintained.
+- **v1 is deprecated** as of the v2.0.0 release. It receives no new features and is
+  not maintained.
+- v1 has been removed from the repository tree; its source remains available in git
+  history before the `v2.0.0` release if you need it during migration.
 - Plan your migration to v2. New deployments should start on v2.

@@ -1,5 +1,0 @@
-go 1.26
-
-// HOG v2 workspace — the new version lives at the repo root.
-// v1/ is archive reference only and is intentionally NOT part of this workspace.
-use .

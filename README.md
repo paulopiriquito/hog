@@ -1,159 +1,123 @@
-# 🐗 HOG - Highly Over-engineered Gateway
+# HOG
 
-A KrakenD-CE fork with built-in **OAuth 2.0 / OIDC authentication**, **static content proxying**, and **enhanced observability** for modern SPA architectures.
+[![tests](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/releases)
+[![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go)](go.mod)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-## What is HOG?
+**A standard-library-first Go application gateway** — a web server *and* backend-for-frontend
+(BFF) / API gateway in a single static binary, configured with Kubernetes-style YAML.
 
-HOG extends the ultra-high performance [KrakenD API Gateway](https://www.krakend.io) with production-ready authentication and observability features:
+One process serves your frontend, terminates the browser session, injects identity into backend
+calls, aggregates APIs, and enforces authorization — with OpenID Connect login, OpenTelemetry
+traces, and compile-time Go plugins. No sidecars, no runtime dependencies, no external control
+plane.
 
-- **🔐 BFF Authentication** - OAuth 2.0 / OIDC plugin acting as a Backend-for-Frontend (PKCE, encrypted cookies, stateless sessions)
-- **📦 Static Content Proxy** - Serve SPAs with optional per-route authentication and auto-redirect after login
-- **📊 Enhanced Observability** - Structured JSON logging with OTEL/Datadog trace correlation
-- **🚀 Zero-Trust by Default** - Secure cookie handling, XSS protection, and automatic JWT injection
+📖 **Documentation:** <https://paulopiriquito.github.io/hog/>
 
-## Quick Start
+> **HOG v2 is a clean-room rewrite on Go 1.26 and the standard library. It is no longer a fork of
+> KrakenD** — it is a native application gateway with its own architecture, configuration model,
+> and extension system. See [Why v2](https://paulopiriquito.github.io/hog/overview/why-v2/) and
+> [Migrating from v1](https://paulopiriquito.github.io/hog/releases/migrating-from-v1/).
+
+## Features
+
+- **Serves your frontend** — a traversal-safe static file server with single-page-app fallback.
+- **Terminates the session** — OpenID Connect login (PKCE) into an encrypted, fingerprinted cookie
+  that never reaches your backends; API clients use a bearer token.
+- **Bridges to your backends** — reverse-proxy a route to one upstream, or aggregate several; the
+  authenticated identity is injected as `X-User-*` headers (access token forwarded only when opted in).
+- **Enforces authorization** — a single `access` block with built-in group/claim rules plus embedded
+  OPA/Rego policies (`kind: Policy`); additive, deny-overrides, fail-closed.
+- **Is observable** — opt-in OpenTelemetry traces & metrics over OTLP, W3C propagation, and a
+  trace-correlated access log.
+- **Secure by default** — enforced `trustedProxies`, gateway-wide CSRF + security headers,
+  `SameSite=Lax` sessions, non-root read-only-friendly images.
+- **Extensible at compile time** — add Go plugins with `hog-build` (no fragile `.so` loading), or
+  import HOG as a framework.
+
+## Quick start — serve a SPA
+
+```dockerfile
+FROM ghcr.io/paulopiriquito/hog-static:latest
+COPY dist/ /srv/web/
+```
+
+```sh
+docker build -t my-spa . && docker run --read-only --tmpfs /tmp -p 8080:8080 my-spa
+```
+
+For a BFF with OIDC login, an API gateway with group-based authorization, and more, see the
+[examples](https://paulopiriquito.github.io/hog/examples/quickstart/).
+
+## Configuration
+
+HOG is configured with Kubernetes-style YAML resources (`${ENV}`-expanded):
 
 ```yaml
-# docker-compose.yaml
-services:
-  gateway:
-    image: ghcr.io/paulopiriquito/hog:latest
-    environment:
-      - IDP_ISSUER=http://your-idp:5556
-      - IDP_CLIENT_ID=your-client
-      - IDP_CLIENT_SECRET=your-secret
-      - AUTH_COOKIE_KEY=abcdefghijklmnopqrstuvwxyz123456 # must be exactly 32 bytes
-    volumes:
-      - ./krakend.json:/etc/krakend/krakend.json
-    ports:
-      - "8080:8080"
-```
-
-```json
-{
-  "version": 3,
-  "extra_config": {
-    "plugin/http-server": {
-      "name": ["hog-authenticator", "hog-static-content"],
-      "hog-authenticator": {
-        "idp": { "type": "oidc" }
-      },
-      "hog-static-content": {
-        "static": [
-          { "path-prefix": "/*", "service-host": "http://spa:3000", "auth": true }
-        ],
-        "service-gateway": { "path-prefix": ["/api/*"] }
-      }
-    }
-  },
-  "endpoints": []
-}
-```
-
-## HOG Plugins
-
-### [hog-authenticator](./plugins/authenticator/README.md)
-OAuth 2.0 / OIDC authentication plugin that acts as a Backend-for-Frontend (BFF):
-- **OIDC Discovery** - Automatic endpoint configuration via `.well-known/openid-configuration`
-- **PKCE Support** - Proof Key for Code Exchange for enhanced security
-- **Encrypted Cookies** - AES-256-GCM encrypted HttpOnly cookies (XSS protection)
-- **Stateless Sessions** - Horizontal scaling with signed state tokens
-- **User Headers** - Automatic injection of `X-User-Id`, `X-User-Email`, `X-User-Name`
-
-### [hog-static-content](./plugins/static-content/README.md)
-Static content proxy with optional authentication:
-- **Wildcard Routing** - Flexible path patterns (`/app/*`, `/assets/*`)
-- **Multiple Upstreams** - Different static servers per path
-- **Optional Auth** - Per-route authentication via `hog-authenticator`
-- **Auto-Redirect** - Unauthenticated users redirected to login, then back to original path
-
-## HOG Packages
-
-Reusable Go packages for extending KrakenD:
-
-| Package | Description |
-|---------|-------------|
-| [pkg/logging](./pkg/logging/) | Structured logging with trace context and access logs |
-| [pkg/headers](./pkg/headers/) | Header manipulation and trace propagation utilities |
-| [pkg/forward](./pkg/forward/) | Project IdP claims into forwarded headers (filter, rename, map) |
-| [pkg/session](./pkg/session/) | Cookie and JWT session management |
-| [pkg/paths](./pkg/paths/) | URL pattern matching for routing |
-| [pkg/pluginlogger](./pkg/pluginlogger/) | Logger wrapper for KrakenD plugins |
-
-## Documentation
-
-### HOG Features
-- [Observability & Trace Correlation](./docs/observability.md) - Configure JSON logging with OTEL/Datadog trace IDs
-- [Authenticator Plugin](./plugins/authenticator/README.md) - Full BFF authentication configuration
-- [Static Content Plugin](./plugins/static-content/README.md) - Static serving with auth options
-- [Local Stack](./tests/local-stack/README.md) - Docker-based testing with Dex IdP and Grafana observability
-- [End-to-End Tests](./tests/e2e/) - Headless-browser tests covering simple-auth, client PKCE, and protected static/API flows
-
-
-This project is not supported by the KrakenD team.
-
+kind: Gateway
+metadata: { name: hog }
+spec:
+  listen: ":8080"
+  session: { key: ${SESSION_KEY} }
 ---
-# Recognition
-
-This project is a fork of [KrakenD Community Edition](https://www.krakend.io)
-Thank you to the KrakenD and Lura team for creating such a great piece of software.
-
-## KrakenD Community Edition
-
-KrakenD is an extensible, ultra-high performance API Gateway that helps you effortlessly adopt microservices and secure communications. KrakenD is easy to operate and run and scales out without a single point of failure.
-
-**KrakenD Community Edition** (or *KrakenD-CE*) is the open-source distribution of [KrakenD](https://www.krakend.io).
-
-[KrakenD Site](https://www.krakend.io/) | [Documentation](https://www.krakend.io/docs/overview/) | [Blog](https://www.krakend.io/blog/) | [Twitter](https://twitter.com/krakend_io) | [Downloads](https://www.krakend.io/download/)
-
-### Benefits
-
-- **Easy integration** of an ultra-high performance gateway.
-- **Effortlessly transition to microservices** and Backend For Frontend implementations.
-- **True linear scalability**: Thanks to its **stateless design**, every KrakenD node can operate independently in the cluster without any coordination or centralized persistence.
-- **Low operational cost**: +70K reqs/s on a single instance of regular size. Super low memory consumption with high traffic (usually under 50MB w/ +1000 concurrent). Fewer machines. Smaller machines. Lower budget.
-- **Platform-agnostic**. Whether you work in a Cloud-native environment (e.g., Kubernetes) or self-hosted on-premises.
-- **No vendor lock-in**: Reuse the best existing open-source and proprietary tools rather than having everything in the gateway (telemetry, identity providers, etc.)
-- **API Lifecycle**: Using **GitOps** and **declarative configuration**.
-- **Decouple clients** from existing services. Create new APIs without changing your existing API contracts.
-
-### Technical features
-
-- **Content aggregation**, composition, and filtering: Create views and mashups of aggregated content from your APIs.
-- **Content Manipulation and format transformation**: Change responses, convert transparently from XML to JSON, and vice-versa.
-- **Security**: Zero-trust policy, CORS, OAuth, JWT, HSTS, clickjacking protection, HPKP, MIME-Sniffing prevention, XSS protection...
-- **Concurrent calls**: Serve content faster than consuming backends directly.
-- **SSL** and  **HTTP2** ready
-- **Throttling**: Limits of usage in the router and proxy layers
-- **Multi-layer rate-limiting** for the end-user and between KrakenD and your services, including bursting, load balancing, and circuit breaker.
-- **Telemetry** and dashboards of all sorts: Datadog, Zipkin, Jaeger, Prometheus, Grafana...
-- **Extensible** with Go plugins, Lua scripts, Martian, or Google CEL spec.
-
-See the [website](https://www.krakend.io) for more information.
-
-### Download
-KrakenD is [packaged and distributed in several formats](https://www.krakend.io/download/). You don't need to clone this repo to use KrakenD unless you want to tweak and build the binary yourself.
-
-### Run
-In its simplest form with the [offical Docker image](https://hub.docker.com/_/krakend):
-
-    docker run -it -p "8080:8080" krakend
-
-Now see [http://localhost:8080/__health](http://localhost:8080/__health). The gateway is listening. Now *CTRL-C* and replace  `/etc/krakend/krakend.json` with your [first configuration](https://designer.krakend.io).
-
-### Build
-See the required Go version in the `Makefile`, and then:
-```
-make build
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: ${OIDC_ISSUER}, clientID: ${OIDC_CLIENT_ID}, clientSecret: ${OIDC_CLIENT_SECRET}, redirectURL: https://app.example.com/auth/callback }
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  handler: { type: reverse-proxy, upstream: http://backend:9000, stripPrefix: /api }
+  access: { auth: required, authorize: [staff] }
+---
+kind: Policy
+metadata: { name: staff }
+spec: { require: { groups: [staff] } }
 ```
 
-Or, if you don't have or don't want to install `go`, you can build it using the golang docker container:
+Full reference: [Configuration](https://paulopiriquito.github.io/hog/operations/configuration/).
 
+## Container images
+
+Published to GHCR (multi-arch: `linux/amd64` + `linux/arm64`), tagged `latest` and each release:
+
+| Image | Purpose |
+|---|---|
+| `ghcr.io/paulopiriquito/hog-runtime` | Secure non-root Alpine runtime base |
+| `ghcr.io/paulopiriquito/hog-static` | SPA server out of the box |
+| `ghcr.io/paulopiriquito/hog-builder` | Compose a custom binary from a plugin manifest |
+| `ghcr.io/paulopiriquito/hog-docs` | This documentation site |
+
+## Build & test
+
+```sh
+make build   # go build ./cmd/hog ./cmd/hog-build
+make ci      # gofmt + vet + test + race
+make e2e     # docker-compose stack (dex + chromedp) end-to-end tests
+make images  # build the container image family locally
+make docs    # build the documentation site
 ```
-make build_on_docker
-```
 
+Requires Go 1.26. `make e2e` requires Docker (or Podman).
 
-### License
+## Extending HOG
 
-Apache Version 2.0 - ./LICENSE
+- **Framework:** `import "github.com/paulopiriquito/hog"`, blank-import your plugin packages, call
+  `hog.Main()`.
+- **Plugins:** write a Go package that registers a module in its `init()`, declare it in the
+  `Gateway.plugins` manifest, and compose a binary with `hog-build`.
+
+See the [Developer guide](https://paulopiriquito.github.io/hog/developer/).
+
+## Repository layout
+
+`cmd/` (`hog`, `hog-build`) · `app` (assembly) · `chain` (middleware spine) · `config` · `gateway`
+· `route` · `terminal` (static / reverse-proxy / api) · `session` · `idp` · `auth` · `authz` ·
+`security` · `telemetry` · `registry` · `selector` · `internal/hogbuild` · `build/` (Dockerfiles) ·
+`website/` (docs) · `tests/e2e/` (dex + chromedp).
+
+## License
+
+[Apache-2.0](LICENSE).

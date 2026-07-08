@@ -1,7 +1,0 @@
-#!/bin/sh
-
-set -e
-
-if [ -e "/etc/init/krakend.conf" ]; then
-	initctl stop krakend > /dev/null
-fi

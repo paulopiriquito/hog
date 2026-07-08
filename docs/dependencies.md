@@ -20,7 +20,7 @@ separate `tests/e2e` module and never enters the runtime build.
 
 `github.com/go-jose/go-jose/v4` is declared as a direct (non-indirect) dependency in `go.mod`
 because Go's module graph counts test-file imports, but a repo-wide, non-test grep
-(`git grep -l "go-jose" -- '*.go' ':!v1/' ':!*_test.go'`) finds zero hits. The only imports are in
+(`git grep -l "go-jose" -- '*.go' ':!*_test.go'`) finds zero hits. The only imports are in
 `app/build_test.go` and `idp/fake_test.go`, where it signs fake ID tokens/JWKS for test fixtures.
 Actual runtime OIDC token verification goes through `github.com/coreos/go-oidc/v3`, which vendors
 its own JOSE handling internally. `go-jose` is therefore a candidate for removal from the runtime

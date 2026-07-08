@@ -230,7 +230,7 @@ func requireStack(t *testing.T) *http.Client {
 	return c
 }
 
-// --- container log helpers (mirror v1/tests/e2e's containerLogs/assertLogContains) ---
+// --- container log helpers (tail a compose service's logs for assertions) ---
 
 // composeProject is the docker-compose.yaml `name:`.
 const composeProject = "hog-e2e"

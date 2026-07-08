@@ -21,7 +21,7 @@ vet:
 	$(GO) vet ./...
 
 fmt: ## fail if any Go file is not gofmt-clean
-	@out=$$(gofmt -l $$(find . -name '*.go' -not -path './v1/*')); \
+	@out=$$(gofmt -l .); \
 	if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 
 tidy:

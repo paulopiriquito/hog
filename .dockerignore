@@ -2,14 +2,10 @@
 # compile from source, so exclude everything the build doesn't need.
 .git
 .github
-v1/
 docs/
 examples/
 *.md
 .dockerignore
-# image builds use GOWORK=off; the workspace references the excluded v1/ module
-go.work
-go.work.sum
 # local build artifacts
 hog
 hog-build
