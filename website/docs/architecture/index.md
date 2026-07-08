@@ -47,6 +47,30 @@ backend call / file read / auth or system response
 response out
 ```
 
+The diagram below fills in the same shape with the actual pieces: the
+gateway-wide edge layers every request crosses first, the fixed per-route
+chain behind the `ServeMux`, and where backend calls, static content, and the
+OIDC IdP fit in.
+
+```mermaid
+flowchart TB
+  client["Browser / API client"] -->|HTTPS| lb["Load balancer (TLS)"]
+  lb -->|"HTTP + X-Forwarded-*"| edge
+  subgraph edge["HOG replica (single Go binary)"]
+    fwd["forwarded<br/>strip untrusted X-Forwarded-*"] --> sec["security<br/>CSRF + headers"] --> otel["otel span"] --> mux["ServeMux (route match)"]
+    mux --> chain
+    subgraph chain["per-route middleware chain"]
+      direction LR
+      rec[recover] --> rid[request-id] --> alog[access-log] --> ses[session] --> ag[auth-gate] --> az[authz] --> proj[projection] --> term[terminal]
+    end
+    reg[("module registry<br/>compile-time")] -.-> chain
+  end
+  term -->|"reverse-proxy / api"| be["Backend APIs"]
+  term -->|static| sc["Static content"]
+  ses -->|OIDC discovery/exchange| idp["OIDC IdP"]
+  ses -.->|optional| sp[("State provider")]
+```
+
 The chapters in this section cover each piece in detail:
 
 - [Request lifecycle](request-lifecycle.md) — the exact stage order a request

@@ -80,10 +80,41 @@ identity and the request's attributes. Any policy that denies returns `403`.
 This stage runs independently of whether a session or IdP is configured at
 all, since a policy can match on request attributes alone.
 
+A deny short-circuits right there — no further stage runs, and the response
+body carries no policy detail (the reason is logged and recorded on the
+request span instead):
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  B->>H: GET /admin (session groups = [viewers])
+  Note over H: authz: Policy require groups=[admins] → not satisfied
+  H-->>B: 403 forbidden (reason logged, not leaked)
+```
+
 **projection** strips any inbound `X-User-*` headers as an anti-spoofing
 measure and, only when a principal is present in context, injects identity
 headers for the backend to trust: a subject header, a groups header, and
 either derived or explicitly mapped claim headers.
+
+Put together, a request that clears every gate looks like this — session
+resolves the `Principal`, auth-gate and authz let it through, and projection
+hands the backend a trustworthy identity instead of the raw cookie:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  participant K as Backend
+  B->>H: GET /api/orders (session cookie)
+  Note over H: session → Principal · auth-gate ✓ · authz ✓ · projection sets X-User-*
+  H->>K: GET /orders (X-User-*, cookie stripped, optional Bearer)
+  K-->>H: 200 JSON
+  H-->>B: 200 JSON
+```
 
 ## The guarded plugin slots and the terminal
 
@@ -127,6 +158,30 @@ aren't `Route` resources at all — they're mounted directly on the `ServeMux`
 and reached only through the gateway-wide edge layers above, never through
 the per-route skeleton (no `recover`/`request-id`/`access-log`/`session`/
 `auth-gate`/`authz`/`projection` around them).
+
+A full OIDC browser login exercises exactly those raw endpoints — a
+protected `app` route's `auth-gate` redirects to `/auth/login`, which is
+itself outside the per-route skeleton, before the round trip lands back on a
+now-authenticated request to the original route:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  participant I as OIDC IdP
+  B->>H: GET /app (no session)
+  H-->>B: 302 → /auth/login
+  B->>H: GET /auth/login
+  H-->>B: 302 → IdP authorize (PKCE + state)
+  B->>I: authenticate
+  I-->>B: 302 → /auth/callback?code&state
+  B->>H: GET /auth/callback
+  H->>I: exchange code, verify id_token
+  H-->>B: Set-Cookie (encrypted session); 302 → /app
+  B->>H: GET /app (session cookie)
+  H-->>B: 200
+```
 
 ## Reserved slots activate only when configured
 

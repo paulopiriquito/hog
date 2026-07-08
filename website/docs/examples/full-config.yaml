@@ -1,0 +1,339 @@
+# =============================================================================
+# HOG — complete, annotated configuration example
+# =============================================================================
+# A single multi-document config that touches every major resource kind, with
+# every field commented. It is designed to PARSE standalone — see
+# app/full_config_test.go, which loads this exact file through config.Load and
+# app.Parse as a drift test — even with no environment variables set:
+# secret-shaped fields use `${VAR:-}` (an explicit empty default) purely so
+# this file is self-contained for docs/testing. A real deployment MUST set
+# SESSION_KEY and OIDC_CLIENT_SECRET; see operations/configuration.md.
+#
+# `apiVersion: hog.dev/v1` appears on every resource below. HOG itself never
+# reads or validates this field — it exists only so tools that DO care about
+# apiVersion/kind (kustomize, kubectl-style tooling) can identify and patch
+# HOG resources. See operations/kustomize.md for rendering this kind of
+# config from a base + per-environment overlays.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Gateway — the root resource. A config must contain exactly one.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Gateway
+metadata:
+  name: hog
+spec:
+  # Address net/http listens on. Defaults to ":8080" if omitted.
+  listen: ":8080"
+
+  # CIDRs/bare IPs trusted to set X-Forwarded-For/-Proto/-Host/-Port,
+  # X-Real-Ip, and Forwarded. A request from any other peer has those headers
+  # stripped before routing/tracing ever see it. The default (empty) trusts
+  # no peer — set this to your load balancer's/ingress's CIDR.
+  trustedProxies:
+    - 10.0.0.0/8
+
+  # The encrypted, HttpOnly session cookie (stateless BFF mode). Omit this
+  # whole block to run HOG as a pure reverse-proxy/aggregation gateway with
+  # no login flow.
+  session:
+    # Must be exactly 32 bytes — used as an AES-256-GCM key. `${SESSION_KEY:-}`
+    # resolves to an empty value when the env var is unset, purely so this
+    # example parses standalone; a real deployment MUST set SESSION_KEY
+    # (e.g. `openssl rand -hex 16`) and never commit the value.
+    key: ${SESSION_KEY:-}
+
+  # The claim/group projection model shared by cookie sessions and Bearer
+  # auth. Omitting this block uses HOG's defaults (claims:
+  # [email, name, given_name, family_name], no groups, userInfo: auto).
+  identity:
+    groups:
+      # The userinfo/ID-token claim holding the group-DN array.
+      source: isMemberOf
+      # Case-insensitive substrings; only DNs containing at least one of
+      # these are kept. A `groups` block with no `match` entries never
+      # matches anything.
+      match:
+        - "ou=staff"
+      # "cn" extracts the cn= component of each kept DN; "dn" keeps the
+      # whole DN string.
+      render: cn
+      # Session field name / default projected-header name for the
+      # rendered group list (e.g. X-User-Groups).
+      as: groups
+
+  # CSRF protection and security response headers, applied gateway-wide as
+  # the outermost wrapper around every response (routes and the raw
+  # /auth/* endpoints alike).
+  security:
+    csrf:
+      # Enables net/http.CrossOriginProtection (Fetch-metadata CSRF
+      # defense). On by default; shown explicitly here. Set false to
+      # disable entirely.
+      enabled: true
+      # Origins to trust for a same-site-but-cross-origin browser SPA —
+      # e.g. a frontend on a different subdomain than this gateway, which
+      # a browser sends as Sec-Fetch-Site: same-site (not same-origin).
+      trustedOrigins:
+        - https://app.example.com
+    headers:
+      # X-Frame-Options value. Set to "" to omit the header.
+      frameOptions: DENY
+      # X-Content-Type-Options value. Set to "" to omit the header.
+      contentTypeOptions: nosniff
+      # Referrer-Policy value. Set to "" to omit the header.
+      referrerPolicy: strict-origin-when-cross-origin
+      hsts:
+        # Sets Strict-Transport-Security. On by default.
+        enabled: true
+        # max-age in seconds.
+        maxAge: 31536000
+        # Adds the includeSubDomains directive.
+        includeSubDomains: true
+        # Adds the preload directive.
+        preload: false
+      # Content-Security-Policy value. HOG sets no default CSP (it depends
+      # on the frontend served) — opt in explicitly.
+      contentSecurityPolicy: "default-src 'self'"
+
+---
+# -----------------------------------------------------------------------------
+# IdP — the OIDC connector. HOG supports exactly one active IdP today.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: IdP
+metadata:
+  name: default
+spec:
+  # Only "oidc" is built in today.
+  type: oidc
+  # The provider's issuer URL, used for OIDC discovery
+  # (<issuer>/.well-known/openid-configuration).
+  issuer: https://idp.example.com
+  # The registered OAuth2 client ID.
+  clientID: hog-example
+  # The registered OAuth2 client secret. `${OIDC_CLIENT_SECRET:-}` resolves
+  # to an empty value when unset, purely so this example parses standalone;
+  # set it via a real secret for actual use.
+  clientSecret: ${OIDC_CLIENT_SECRET:-}
+  # Must match a redirect URI registered with the provider. Its PATH becomes
+  # HOG's callback route automatically — no separate Route is declared for it.
+  redirectURL: http://localhost:8080/auth/callback
+  # Requested scopes. Defaults to [openid, profile, email] if omitted.
+  scopes:
+    - openid
+    - profile
+    - email
+
+---
+# -----------------------------------------------------------------------------
+# Telemetry — OpenTelemetry export + access-log settings. At most one.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Telemetry
+metadata:
+  name: default
+spec:
+  # Required: the OpenTelemetry service.name resource attribute.
+  service:
+    name: hog-example
+  otlp:
+    # The OTLP collector endpoint. Falls back to a local default when the
+    # env var is unset.
+    endpoint: ${OTLP_ENDPOINT:-http://localhost:4318}
+    # "http/protobuf" or "grpc".
+    protocol: http/protobuf
+  accessLog:
+    # debug|info|warn|error — level the access-log line is emitted at.
+    level: info
+
+---
+# -----------------------------------------------------------------------------
+# Route — static frontend, publicly reachable.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Route
+metadata:
+  name: app
+spec:
+  # A net/http.ServeMux pattern. Trailing slash = subtree match. Must be
+  # unique across all routes.
+  match: /
+  # Inferred as "app" from handler.type: static; set explicitly for clarity.
+  type: app
+  handler:
+    type: static
+    # Directory served (traversal-safe, built on os.Root).
+    dir: /srv/web
+    # Filename served for the directory root and, on a miss, the SPA
+    # fallback shell.
+    index: index.html
+    # On a miss for an extensionless path, serve `index` instead of 404 —
+    # lets client-side routing own its own URLs.
+    spaFallback: true
+  access:
+    # "app" routes default to public anyway; shown explicitly.
+    auth: public
+
+---
+# -----------------------------------------------------------------------------
+# Route — authenticated reverse-proxy to a single backend service.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Route
+metadata:
+  name: account
+  # Labels matched by the RouteGroup selector below. A route's own `access`
+  # always wins field-by-field over a matching group; `authorize` unions
+  # instead of being replaced.
+  labels:
+    tier: api
+spec:
+  match: /account/
+  # Inferred as "service" from handler.type: reverse-proxy; set explicitly.
+  type: service
+  handler:
+    type: reverse-proxy
+    # Base URL of the backend.
+    upstream: http://account-svc:9000
+    # Trimmed from the outbound path before proxying.
+    stripPrefix: /account
+    # Forward the inbound Host header instead of the upstream's.
+    preserveHost: false
+    # Inject Authorization: Bearer <access token> from the session
+    # principal onto the outbound request. Off by default.
+    forwardAccessToken: true
+    # Pass the inbound Cookie header through. Off by default — HOG's own
+    # session/login cookies are never meant to reach a backend.
+    forwardCookies: false
+    # Per-request timeout; a timeout returns 504, any other proxy error 502.
+    timeout: 10s
+    # Disable upstream TLS certificate verification. Use only for trusted
+    # internal backends with self-signed certs.
+    insecureSkipVerify: false
+  access:
+    auth: required
+    # Names of `kind: Policy` resources to enforce, unioned with any
+    # matching RouteGroup's access.authorize.
+    authorize:
+      - staff
+    # Customizes the X-User-* headers injected for the backend instead of
+    # the default "one X-User-<Claim> per passport claim" projection.
+    projection:
+      session:
+        claims:
+          email: X-User-Email
+        groups:
+          header: X-User-Roles
+
+---
+# -----------------------------------------------------------------------------
+# Route — API aggregation, fanning out to two backends concurrently and
+# merging their JSON responses under one key per backend.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Route
+metadata:
+  name: dashboard
+  labels:
+    tier: api
+spec:
+  match: /api/dashboard
+  type: service
+  handler:
+    type: api
+    # Overall request timeout, applied to every backend call via a shared
+    # context.
+    timeout: 5s
+    backends:
+      - # JSON key this backend's response is merged under. Required,
+        # unique per handler.
+        group: profile
+        # Base URL of this backend.
+        upstream: http://users-svc:9000
+        # Request path, joined onto the upstream. Supports {name}
+        # placeholders resolved from the route's own path parameters.
+        path: /me
+        # HTTP method for the backend call. Defaults to GET.
+        method: GET
+        # If true (default), a failed/timed-out call fails the whole
+        # request (502/504).
+        required: true
+        # Forward the inbound request's query string to this backend.
+        forwardQuery: false
+        # Inject Authorization: Bearer <access token> for this backend only.
+        forwardAccessToken: true
+      - group: notifications
+        upstream: http://notif-svc:9100
+        path: /unread
+        method: GET
+        # false: on failure this backend is omitted from the merged body
+        # and its group name listed in the X-Hog-Partial response header,
+        # instead of failing the whole request.
+        required: false
+        forwardQuery: true
+        forwardAccessToken: false
+  access:
+    auth: required
+    authorize:
+      - staff
+
+---
+# -----------------------------------------------------------------------------
+# RouteGroup — applies a shared access block to every Route whose labels
+# match `selector`, the same pattern as a Kubernetes Service selecting Pods.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: RouteGroup
+metadata:
+  name: api-tier
+spec:
+  selector:
+    # Exact-match label set. matchExpressions (key/operator/values, with
+    # operator In|NotIn|Exists|DoesNotExist) is also available for set-based
+    # matching.
+    matchLabels:
+      tier: api
+  access:
+    auth: required
+    authorize:
+      - staff
+
+---
+# -----------------------------------------------------------------------------
+# Policy — built-in group/claim rule (Tier A), referenced from
+# access.authorize on a Route or RouteGroup.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Policy
+metadata:
+  name: staff
+spec:
+  require:
+    # Any-of: the principal must belong to at least one listed group.
+    groups:
+      - staff
+    # All-of across keys; each value is a scalar or list (any-of within
+    # that claim). Uncomment to additionally require a claim match:
+    # claims:
+    #   tier: [gold, platinum]
+
+---
+# -----------------------------------------------------------------------------
+# Policy — embedded OPA/Rego rule (Tier B), an alternative (or addition) to
+# `require`. A policy is satisfied iff require passes (when present) AND the
+# rego evaluation produces no deny (when present).
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Policy
+metadata:
+  name: business-hours
+spec:
+  rego:
+    # File or directory of .rego source, resolved relative to where the
+    # config is loaded from. Must define `deny` under `package hog.authz`.
+    # (Parsing this resource never reads the file — only building the
+    # runtime handler does — so this path does not need to exist for the
+    # config itself to load and validate.)
+    path: policies/business-hours.rego

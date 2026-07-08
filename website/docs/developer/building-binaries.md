@@ -112,3 +112,21 @@ Once built, run the binary against your config like any other HOG binary
 (`./hog --config gateway.yaml`) and confirm the routes backed by your plugins
 respond as expected. See [Testing plugins](testing.md) for how to automate
 this as part of your plugin's own test suite.
+
+## Rendering config with kustomize
+
+The `hog-builder` image includes `kustomize`, so if you manage your config
+as a `kustomize` base + per-environment overlays (see
+[operations: rendering config with kustomize](../operations/kustomize.md)),
+you can render the overlay and feed it straight to `hog-build` in the same
+build stage — no extra base image, no separate render step in CI:
+
+```dockerfile
+FROM ghcr.io/paulopiriquito/hog-builder:v2.0.0 AS build
+COPY config/ ./config/
+RUN kustomize build config/overlays/prod > /out/gateway.yaml
+RUN hog-build --config /out/gateway.yaml -o /out/hog
+```
+
+See [operations: rendering config with kustomize](../operations/kustomize.md)
+for the base/overlay layout and a complete worked example.

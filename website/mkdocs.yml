@@ -15,6 +15,8 @@ docs_dir: docs
 
 theme:
   name: material
+  logo: assets/hog.svg
+  favicon: assets/hog.svg
   language: en
   features:
     - navigation.sections
@@ -74,7 +76,11 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:
@@ -108,6 +114,7 @@ nav:
       - operations/index.md
       - Installation & images: operations/installation.md
       - Configuration reference: operations/configuration.md
+      - Rendering config with kustomize: operations/kustomize.md
       - Authentication: operations/authentication.md
       - Authorization: operations/authorization.md
       - Observability: operations/observability.md

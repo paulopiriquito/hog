@@ -6,11 +6,10 @@ it: the zero-config `hog-static` image, and an explicit `gateway.yaml` that
 turns off SPA fallback so a genuinely missing page still `404`s.
 
 !!! note "Prerequisites"
-    - Docker.
-    - A local clone of the HOG repository. The `hog-runtime`/`hog-static`
-      image family isn't published to a registry yet (see
-      [Delivering HOG](https://github.com/paulopiriquito/hog/blob/v2/docs/delivery.md)),
-      so you build them once, locally, from the repo root.
+    - Docker. The images used below are pulled straight from GHCR — no
+      local build or repository clone needed. See
+      [Installation and images](../operations/installation.md) for the
+      full image family.
 
 ## Folder structure
 
@@ -23,20 +22,22 @@ static-site/
 └── Dockerfile
 ```
 
-## 1. Build the base images
+## 1. Pull the published images
 
-From the repository root, build `hog-runtime` first — `hog-static` is
-layered on top of it and won't resolve until the tag exists:
+Both images used in this guide are published, multi-arch, to GHCR. Pull
+them ahead of time, or just let `docker build` pull them on demand when it
+hits the `FROM` line:
 
 ```sh
-docker build -f build/Dockerfile.runtime -t hog-runtime .
-docker build -f build/Dockerfile.static  -t hog-static  .
+docker pull ghcr.io/paulopiriquito/hog-static:v2.0.0
+docker pull ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 ```
 
 !!! success "Expected result"
     Two local images: `hog-runtime` (the vanilla binary, non-root `hog`
     user, `/etc/hog` and `/srv/web` pre-created) and `hog-static` (that plus
-    a baked-in SPA config and a placeholder `index.html`).
+    a baked-in SPA config and a placeholder `index.html`). Swap `:v2.0.0`
+    for `:latest` to track the newest release instead of pinning.
 
 ## 2. Write the site content
 
@@ -91,7 +92,7 @@ nav a { margin-right: 1rem; }
 on `/` — there's no config to write. Create `Dockerfile`:
 
 ```dockerfile
-FROM hog-static
+FROM ghcr.io/paulopiriquito/hog-static:v2.0.0
 COPY site/ /srv/web/
 ```
 
@@ -145,7 +146,7 @@ Layer this on `hog-runtime` instead — the vanilla image, so you own the
 whole config:
 
 ```dockerfile
-FROM hog-runtime
+FROM ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 COPY --chown=hog:hog site/ /srv/web/
 COPY --chown=hog:hog gateway.yaml /etc/hog/gateway.yaml
 ```

@@ -15,8 +15,12 @@ route group.
     - A JSON backend reachable at `http://backend:9000` — see
       [Aggregate multiple backends](api-aggregation.md) for a two-line
       stand-in, or bring your own.
-    - Docker, and the `hog-runtime` image built locally, as in
-      [Serve a static site](quickstart-static.md).
+    - Docker, and the `hog-runtime` image — pulled straight from GHCR (no
+      local build needed):
+      `docker pull ghcr.io/paulopiriquito/hog-runtime:v2.0.0`, or just let
+      `docker build` pull it on demand. See
+      [Installation and images](../operations/installation.md) for the
+      full image family.
 
 ## Folder structure
 
@@ -138,10 +142,30 @@ spec:
 ## 3. Write the Dockerfile
 
 ```dockerfile
-FROM hog-runtime
+FROM ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 COPY --chown=hog:hog gateway.yaml /etc/hog/gateway.yaml
 COPY --chown=hog:hog policies/    /etc/hog/policies/
 ```
+
+!!! tip "Rendering config with kustomize"
+    For a config that varies per environment (dev/staging/prod), keep a
+    `base/` + `overlays/<env>/` kustomize layout instead of hand-editing
+    `gateway.yaml`, and render it in a build stage with `hog-builder`
+    (which ships `kustomize`) before handing the result to `hog-runtime`:
+
+    ```dockerfile
+    FROM ghcr.io/paulopiriquito/hog-builder:v2.0.0 AS build
+    COPY config/ /work/config/
+    WORKDIR /work/config
+    RUN kustomize build overlays/prod > /out/gateway.yaml
+
+    FROM ghcr.io/paulopiriquito/hog-runtime:v2.0.0
+    COPY --from=build --chown=hog:hog /out/gateway.yaml /etc/hog/gateway.yaml
+    COPY --chown=hog:hog policies/ /etc/hog/policies/
+    ```
+
+    See [Rendering config with kustomize](../operations/kustomize.md) for
+    the base/overlay layout and a full worked example.
 
 ## 4. Build and run it
 

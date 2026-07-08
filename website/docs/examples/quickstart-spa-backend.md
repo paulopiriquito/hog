@@ -11,9 +11,11 @@ client ID, a token, or a redirect.
       secret, and `http://localhost:8080/auth/callback` registered as a
       redirect URL.
     - Node.js (for the Vite build) and Docker.
-    - The `hog-runtime` image built locally, as in
-      [Serve a static site](quickstart-static.md)
-      (`docker build -f build/Dockerfile.runtime -t hog-runtime .`).
+    - The `hog-runtime` image, pulled straight from GHCR (no local build
+      needed) — `docker pull ghcr.io/paulopiriquito/hog-runtime:v2.0.0`, or
+      just let `docker build` pull it on demand. See
+      [Installation and images](../operations/installation.md) for the
+      full image family.
 
 ## Folder structure
 
@@ -135,7 +137,8 @@ spec:
 ## 3. Write the Dockerfile
 
 A multi-stage build: Node builds the Vite bundle, then it's copied onto
-`hog-runtime` next to the config:
+`hog-runtime` — pulled straight from GHCR, no local build needed — next to
+the config:
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -146,7 +149,7 @@ RUN npm ci
 COPY frontend/ .
 RUN npm run build
 
-FROM hog-runtime
+FROM ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 COPY --from=frontend-build --chown=hog:hog /app/dist /srv/web
 COPY --chown=hog:hog gateway.yaml /etc/hog/gateway.yaml
 ```
