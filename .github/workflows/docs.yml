@@ -1,11 +1,11 @@
 name: docs
 
 # Builds and publishes the HOG documentation site to GitHub Pages.
-# Runs when the site changes on the v2 branch. Enable Pages for the repo
+# Runs when the site changes on the default branch. Enable Pages for the repo
 # (Settings -> Pages -> Source: gh-pages branch) before the first run.
 on:
   push:
-    branches: [v2]
+    branches: [master]
     paths:
       - website/**
       - .github/workflows/docs.yml
