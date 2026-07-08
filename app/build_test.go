@@ -902,3 +902,80 @@ spec: { match: /x/, type: app, handler: { type: echo-user } }
 		t.Fatal("Build must fail when stateProvider is set without a session block")
 	}
 }
+
+func TestBuildReverseProxyRouteServes(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(201)
+		io.WriteString(w, "proxied")
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg) // includes reverse-proxy + api
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /svc/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+`, stripPrefix: /svc }
+  policy: { auth: public }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/svc/thing", nil))
+	if rec.Code != 201 || rec.Body.String() != "proxied" {
+		t.Fatalf("proxy route status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestBuildAPIRouteServes(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `{"v":1}`)
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: dash }
+spec:
+  match: /dash/
+  type: service
+  handler:
+    type: api
+    backends:
+      - { group: org, upstream: `+backend.URL+`, path: /org }
+  policy: { auth: public }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/dash/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("api route status = %d", rec.Code)
+	}
+	if rec.Body.String() != `{"org":{"v":1}}`+"\n" { // json.Encoder appends a newline
+		t.Fatalf("api route body = %q", rec.Body.String())
+	}
+}

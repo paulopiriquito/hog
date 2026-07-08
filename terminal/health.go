@@ -1,5 +1,5 @@
-// Package terminal provides built-in terminal (route-final) handlers: health
-// and static. Proxy/api/auth/system handlers are added by later specs.
+// Package terminal provides built-in terminal (route-final) handlers: health,
+// static, reverse-proxy, and api. Auth/system handlers are added by later specs.
 package terminal
 
 import (
@@ -20,4 +20,6 @@ func Register(reg *registry.Registry) {
 		}), nil
 	})
 	registerStatic(reg)
+	registerProxy(reg)
+	registerAPI(reg)
 }
