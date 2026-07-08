@@ -2336,10 +2336,11 @@ framework-mode consumer depends on.</p>
   <code>internal/hogbuild</code>'s binary-composition test) for a fast inner loop; run
   the full suite, including <code>-race</code> for concurrency-sensitive packages,
   before opening a pull request.</li>
-<li><strong><code>v1/</code> is an archive.</strong> It's the previous KrakenD-based gateway, kept for
-  reference and explicitly excluded from the Go workspace (<code>go.work</code> only
-  <code>use</code>s the repo root). Don't modify it — all new work targets the v2 tree
-  described above.</li>
+<li><strong>Modules.</strong> The repo is a single Go module at the root; <code>tests/e2e</code> and
+  <code>internal/hogbuild/testdata/plugin</code> are nested modules with their own <code>go.mod</code>,
+  so they're excluded from the root's <code>go build/test ./...</code>. The predecessor
+  KrakenD-based gateway (v1) is not in the tree — it lives in git history before
+  the <code>v2.0.0</code> release.</li>
 </ul>
 
 
