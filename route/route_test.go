@@ -177,3 +177,39 @@ func TestResolveEmptyGroupDoesNotClobber(t *testing.T) {
 }
 
 func selectorMatchAll() selector.Selector { return selector.Selector{} }
+
+func matchLabels(t *testing.T, k, v string) selector.Selector {
+	t.Helper()
+	return selector.Selector{MatchLabels: map[string]string{k: v}}
+}
+
+func TestResolveUnionsPolicies(t *testing.T) {
+	rt := Route{
+		Name: "r", Labels: map[string]string{"tier": "api"},
+		Match: "/x", Handler: HandlerSpec{Type: "health"},
+		Policies: []string{"p1", "p2"},
+	}
+	groups := []RouteGroup{
+		{Name: "g1", Selector: matchLabels(t, "tier", "api"), Policies: []string{"p2", "p3"}}, // p2 dup
+		{Name: "g2", Selector: matchLabels(t, "tier", "web"), Policies: []string{"p4"}},       // no match
+	}
+	res, err := Resolve(rt, groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, p := range res.Policies {
+		if got[p] {
+			t.Fatalf("duplicate policy in resolved set: %q (%v)", p, res.Policies)
+		}
+		got[p] = true
+	}
+	for _, want := range []string{"p1", "p2", "p3"} {
+		if !got[want] {
+			t.Fatalf("missing policy %q in %v", want, res.Policies)
+		}
+	}
+	if got["p4"] {
+		t.Fatalf("non-matching group's policy leaked in: %v", res.Policies)
+	}
+}

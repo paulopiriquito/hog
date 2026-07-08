@@ -40,12 +40,13 @@ func (h *HandlerSpec) UnmarshalYAML(node *yaml.Node) error {
 
 // Route is a single routable endpoint.
 type Route struct {
-	Name    string
-	Labels  map[string]string
-	Match   string      `yaml:"match"`
-	Type    string      `yaml:"type"`
-	Handler HandlerSpec `yaml:"handler"`
-	Policy  Policy      `yaml:"policy"`
+	Name     string
+	Labels   map[string]string
+	Match    string      `yaml:"match"`
+	Type     string      `yaml:"type"`
+	Handler  HandlerSpec `yaml:"handler"`
+	Policy   Policy      `yaml:"policy"`
+	Policies []string    `yaml:"policies"`
 }
 
 // Policy is the per-route/group auth + projection configuration.
@@ -78,6 +79,7 @@ type RouteGroup struct {
 	Type     string            `yaml:"type"`
 	Selector selector.Selector `yaml:"selector"`
 	Policy   Policy            `yaml:"policy"`
+	Policies []string          `yaml:"policies"`
 }
 
 // ParseRoute decodes a Route resource.
@@ -132,11 +134,14 @@ type Resolved struct {
 	Type       string // app | service
 	Auth       string // required | public
 	Projection *ProjectionConfig
+	Policies   []string
 }
 
-// Resolve computes a route's effective type, auth, and projection from the route's
-// own fields, the matching RouteGroup policies (document order, later wins), and
-// type-inferred defaults. Returns an error on an invalid type/auth value.
+// Resolve computes a route's effective type, auth, projection, and authorization
+// policy set (the union of the route's own `policies` with every matching
+// RouteGroup's, deduped) from the route's own fields, the matching RouteGroup
+// policies (document order, later wins), and type-inferred defaults. Returns an
+// error on an invalid type/auth value.
 func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 	var gType, gAuth string
 	var proj *ProjectionConfig
@@ -179,7 +184,25 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 	if rt.Policy.Projection != nil {
 		proj = rt.Policy.Projection
 	}
-	return Resolved{Type: typ, Auth: auth, Projection: proj}, nil
+
+	var policies []string
+	seen := map[string]bool{}
+	add := func(names []string) {
+		for _, n := range names {
+			if n != "" && !seen[n] {
+				seen[n] = true
+				policies = append(policies, n)
+			}
+		}
+	}
+	add(rt.Policies)
+	for _, g := range groups {
+		if g.Selector.Matches(rt.Labels) {
+			add(g.Policies)
+		}
+	}
+
+	return Resolved{Type: typ, Auth: auth, Projection: proj, Policies: policies}, nil
 }
 
 // inferType maps a handler type to a default route type.

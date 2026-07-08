@@ -21,10 +21,11 @@ type builtin struct {
 }
 
 // Gates supplies real implementations for the reserved skeleton slots
-// (session, auth-gate, projection). A nil field keeps the reserved() pass-through.
+// (session, auth-gate, authz, projection). A nil field keeps the reserved() pass-through.
 type Gates struct {
 	Session    Middleware
 	AuthGate   Middleware
+	Authz      Middleware
 	Projection Middleware
 }
 
@@ -38,8 +39,8 @@ type Observability struct {
 // route, with the supplied gates filling their reserved slots. Developer plugins
 // are appended AFTER this list by the app, so they can never run ahead of these
 // gates. recover/request-id are always real; access-log uses obs (or its
-// default when nil); security and authz remain reserved pass-throughs;
-// session/auth-gate/projection use the supplied gates (or reserved() when nil).
+// default when nil); security remains a reserved pass-through;
+// session/auth-gate/authz/projection use the supplied gates (or reserved() when nil).
 func Skeleton(logger *slog.Logger, gates Gates, obs Observability) []Middleware {
 	if logger == nil {
 		logger = slog.Default()
@@ -74,7 +75,7 @@ func skeleton(logger *slog.Logger, gates Gates, obs Observability) []builtin {
 		{"security", reserved()}, // CSRF + headers — implemented in BFF/security spec
 		{"session", orReserved(gates.Session)},
 		{"auth-gate", orReserved(gates.AuthGate)},
-		{"authz", reserved()}, // OPA — authz spec
+		{"authz", orReserved(gates.Authz)},
 		{"projection", orReserved(gates.Projection)},
 	}
 }

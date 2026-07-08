@@ -37,6 +37,7 @@ const (
 	KindIdP             = "IdP"
 	KindStateProvider   = "StateProvider"
 	KindTelemetry       = "Telemetry"
+	KindPolicy          = "Policy"
 )
 
 // DecodeAll decodes a multi-document YAML stream into resources, skipping

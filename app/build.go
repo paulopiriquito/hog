@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"sort"
 
 	"github.com/paulopiriquito/hog/auth"
+	"github.com/paulopiriquito/hog/authz"
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/gateway"
@@ -58,6 +60,7 @@ type Config struct {
 	ResponsePlugins []PluginInstance
 	IdPResources    []config.Resource
 	Telemetry       telemetry.Config
+	Policies        []config.Resource
 }
 
 // Parse converts loaded resources into a typed Config. Document order (the
@@ -102,6 +105,8 @@ func Parse(resources []config.Resource) (Config, error) {
 			}
 		case config.KindIdP:
 			cfg.IdPResources = append(cfg.IdPResources, r)
+		case config.KindPolicy:
+			cfg.Policies = append(cfg.Policies, r)
 		case config.KindTelemetry:
 			if telemetrySeen {
 				return Config{}, fmt.Errorf("config must contain at most one Telemetry resource (duplicate %q)", r.Metadata.Name)
@@ -186,6 +191,10 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	}
 	mux := http.NewServeMux()
 	seen := make(map[string]string) // match pattern -> first route name using it
+	compiledPolicies, err := authz.Compile(context.Background(), cfg.Policies)
+	if err != nil {
+		return nil, err
+	}
 	for _, rt := range cfg.Routes {
 		if prev, dup := seen[rt.Match]; dup {
 			return nil, fmt.Errorf("route %q: duplicate match %q (already used by route %q)", rt.Name, rt.Match, prev)
@@ -224,6 +233,19 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		} else if resolved.Auth == "required" {
 			logger.Warn("route requires auth but neither a session nor an IdP is configured; it will be served WITHOUT enforcement",
 				"route", rt.Name, "match", rt.Match)
+		}
+		// Authz is resolved independent of authActive: a policy may authorize
+		// on request attributes alone, without a session/IdP configured.
+		if len(resolved.Policies) > 0 {
+			pols := make([]*authz.Policy, 0, len(resolved.Policies))
+			for _, name := range resolved.Policies {
+				pol, ok := compiledPolicies[name]
+				if !ok {
+					return nil, fmt.Errorf("route %q: unknown policy %q", rt.Name, name)
+				}
+				pols = append(pols, pol)
+			}
+			gates.Authz = authz.Gate(pols, rt.Name, rt.Labels, logger)
 		}
 		obs := chain.Observability{AccessLog: accessLog}
 		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates, obs)...)

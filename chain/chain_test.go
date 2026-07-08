@@ -119,16 +119,16 @@ func TestSkeletonInjectsGates(t *testing.T) {
 			})
 		})
 	}
-	gates := Gates{Session: mk("session"), AuthGate: mk("auth"), Projection: mk("proj")}
+	gates := Gates{Session: mk("session"), AuthGate: mk("auth"), Authz: mk("authz"), Projection: mk("proj")}
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
 	Compose(terminal, Skeleton(nil, gates, Observability{})...).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 
 	// The injected gates run in their fixed skeleton positions, before the terminal;
-	// the un-instrumented reserved slots (recover/request-id/access-log/security/authz)
+	// the un-instrumented reserved slots (recover/request-id/access-log/security)
 	// are pass-throughs and contribute nothing to ran.
 	got := strings.Join(ran, ",")
-	if got != "session,auth,proj,terminal" {
-		t.Fatalf("gate order = %q, want \"session,auth,proj,terminal\"", got)
+	if got != "session,auth,authz,proj,terminal" {
+		t.Fatalf("gate order = %q, want \"session,auth,authz,proj,terminal\"", got)
 	}
 	// Cross-check the gates occupy the named slots in the fixed order.
 	names := SkeletonNames()
@@ -155,6 +155,25 @@ func TestSkeletonNilGatesAllReserved(t *testing.T) {
 	Compose(terminal, Skeleton(nil, Gates{}, Observability{})...).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 204 {
 		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestSkeletonInjectsAuthzGateOnly(t *testing.T) {
+	// Authz is the only gate supplied: it must fill the reserved "authz" slot
+	// (between auth-gate and projection) while session/auth-gate/projection stay
+	// reserved pass-throughs.
+	var ran []string
+	authzMW := Func(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ran = append(ran, "authz")
+			next.ServeHTTP(w, r)
+		})
+	})
+	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
+	Compose(terminal, Skeleton(nil, Gates{Authz: authzMW}, Observability{})...).
+		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	if strings.Join(ran, ",") != "authz,terminal" {
+		t.Fatalf("authz-only gate ran = %v, want [authz terminal]", ran)
 	}
 }
 

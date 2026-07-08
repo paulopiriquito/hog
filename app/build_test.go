@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -1410,4 +1412,301 @@ func metricHasRoute(rm metricdata.ResourceMetrics, route string) bool {
 		}
 	}
 	return false
+}
+
+func TestBuildAuthzAllowsSatisfyingPrincipal(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Policy
+metadata: { name: admins }
+spec: { require: { groups: [admins] } }
+---
+kind: Route
+metadata: { name: a }
+spec: { match: /admin/, type: service, handler: { type: echo-user }, policies: [admins] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 { // minted principal IS in group admins ⇒ policy satisfied
+		t.Fatalf("admin principal ⇒ 200, got %d", rec.Code)
+	}
+}
+
+func TestBuildAuthzDeniesNonSatisfyingPrincipal(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Policy
+metadata: { name: nobody }
+spec: { require: { groups: [nobody] } }
+---
+kind: Route
+metadata: { name: a }
+spec: { match: /admin/, type: service, handler: { type: echo-user }, policies: [nobody] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/admin/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 403 { // minted principal NOT in group nobody ⇒ denied
+		t.Fatalf("non-satisfying principal ⇒ 403, got %d", rec.Code)
+	}
+}
+
+func TestBuildAuthzDanglingReferenceFailsBuild(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: a }
+spec: { match: /x/, type: app, handler: { type: echo-user }, policies: [nope] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("dangling policy reference must fail Build")
+	}
+}
+
+func TestBuildAuthzBadRegoFailsBuild(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.rego"), []byte("package hog.authz\nthis is not rego"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Policy
+metadata: { name: bad }
+spec: { rego: { path: `+dir+` } }
+---
+kind: Route
+metadata: { name: a }
+spec: { match: /x/, type: app, handler: { type: echo-user }, policies: [bad] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("bad rego must fail Build")
+	}
+}
+
+func TestBuildNoPoliciesDefaultAllow(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: a }
+spec: { match: /open/, type: app, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/open/", nil))
+	if rec.Code != 200 { // no policies referenced ⇒ default-allow
+		t.Fatalf("no-policy route ⇒ 200, got %d", rec.Code)
+	}
+}
+
+// TestBuildAuthzPolicyViaRouteGroupEnforced proves a policy applied through a
+// matching RouteGroup's `policies` — not the route's own `policies` — is part
+// of the route's effective policy set and is enforced.
+func TestBuildAuthzPolicyViaRouteGroupEnforced(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Policy
+metadata: { name: restricted }
+spec: { require: { groups: [nobody] } }
+---
+kind: RouteGroup
+metadata: { name: locked }
+spec:
+  selector: { matchLabels: { tier: locked } }
+  policies: [restricted]
+---
+kind: Route
+metadata: { name: a, labels: { tier: locked } }
+spec: { match: /locked/, type: service, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/locked/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 403 {
+		t.Fatalf("group-applied policy (require nobody) ⇒ 403, got %d", rec.Code)
+	}
+}
+
+// TestBuildAuthzGatePerRouteIsolation proves the per-route authz gate built
+// for a denying route does not leak onto an adjacent route built in the same
+// pass: /locked/ (labeled, gets the RouteGroup's denying policy) must 403,
+// while /open/ (unlabeled, no effective policy) must still 200.
+func TestBuildAuthzGatePerRouteIsolation(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Policy
+metadata: { name: restricted }
+spec: { require: { groups: [nobody] } }
+---
+kind: RouteGroup
+metadata: { name: locked }
+spec:
+  selector: { matchLabels: { tier: locked } }
+  policies: [restricted]
+---
+kind: Route
+metadata: { name: a, labels: { tier: locked } }
+spec: { match: /locked/, type: service, handler: { type: echo-user } }
+---
+kind: Route
+metadata: { name: b }
+spec: { match: /open/, type: app, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(path string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("User-Agent", "UA")
+		for _, c := range mintSessionCookie(t, testKey) {
+			req.AddCookie(c)
+		}
+		a.Handler.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if c := do("/locked/"); c != 403 {
+		t.Fatalf("/locked/ (denying policy) ⇒ 403, got %d", c)
+	}
+	if c := do("/open/"); c != 200 {
+		t.Fatalf("/open/ (no policy) ⇒ 200 (authz gate must not leak), got %d", c)
+	}
+}
+
+func TestBuildAuthzEndToEnd(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "p.rego"), []byte(`package hog.authz
+import rego.v1
+deny contains msg if { input.request.method == "DELETE"; msg := "no deletes" }
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Policy
+metadata: { name: no-delete }
+spec: { rego: { path: `+dir+` } }
+---
+kind: Route
+metadata: { name: pub }
+spec: { match: /pub/, type: app, handler: { type: echo-user }, policies: [no-delete] }
+---
+kind: Route
+metadata: { name: open }
+spec: { match: /open/, type: app, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		a.Handler.ServeHTTP(rec, httptest.NewRequest(method, "http://h"+path, nil))
+		return rec.Code
+	}
+	if c := do("GET", "/pub/"); c != 200 {
+		t.Fatalf("GET /pub/ ⇒ %d, want 200 (rego allows GET)", c)
+	}
+	if c := do("DELETE", "/pub/"); c != 403 {
+		t.Fatalf("DELETE /pub/ ⇒ %d, want 403 (rego deny)", c)
+	}
+	if c := do("DELETE", "/open/"); c != 200 {
+		t.Fatalf("DELETE /open/ (no policies) ⇒ %d, want 200 (default-allow)", c)
+	}
 }
