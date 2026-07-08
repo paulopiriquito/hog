@@ -108,8 +108,7 @@ func (h *Handlers) Callback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s := h.sess.New(identity, userinfo, tokens, r)
-	if err := h.sess.Write(w, r, s); err != nil {
+	if err := h.sess.Issue(w, r, identity, userinfo, tokens); err != nil {
 		h.log.Error("auth: write session", "err", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return

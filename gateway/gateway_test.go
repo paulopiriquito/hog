@@ -88,3 +88,14 @@ func TestFromResourceCapturesIdentityBlock(t *testing.T) {
 		t.Fatal("identity node not captured")
 	}
 }
+
+func TestFromResourceCapturesStateProviderBlock(t *testing.T) {
+	rs, _ := config.DecodeAll([]byte("kind: Gateway\nmetadata: {name: hog}\nspec:\n  stateProvider:\n    type: valkey\n"))
+	g, err := FromResource(rs[0])
+	if err != nil {
+		t.Fatalf("FromResource: %v", err)
+	}
+	if g.StateProvider.Kind == 0 {
+		t.Fatal("stateProvider node not captured")
+	}
+}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -374,8 +376,9 @@ func mintSessionCookie(t *testing.T, key string) []*http.Cookie {
 	rq := httptest.NewRequest("GET", "/", nil)
 	rq.Header.Set("User-Agent", "UA")
 	ui := map[string]any{"email": "a@b.co", "isMemberOf": []any{"cn=admins,ou=applicationRole"}}
-	s := m.New(&idp.Identity{Subject: "u-1"}, ui, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}, rq)
-	_ = m.Write(wr, rq, s)
+	if err := m.Issue(wr, rq, &idp.Identity{Subject: "u-1"}, ui, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	return wr.Result().Cookies()
 }
 
@@ -769,5 +772,133 @@ spec: { match: /app/, type: app, handler: { type: echo-bearer }, policy: { auth:
 	a.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("app route must ignore Bearer and redirect, got %d", rec.Code)
+	}
+}
+
+// appTestStore is an in-memory StateStore for the app e2e (registered under "memory").
+type appTestStore struct {
+	mu sync.Mutex
+	m  map[string][]byte
+}
+
+func (s *appTestStore) Get(_ context.Context, k string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[k]
+	if !ok {
+		return nil, session.ErrStateNotFound
+	}
+	return v, nil
+}
+func (s *appTestStore) Set(_ context.Context, k string, v []byte, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[k] = v
+	return nil
+}
+func (s *appTestStore) Delete(_ context.Context, k string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, k)
+	return nil
+}
+
+func registerMemoryStore(reg *registry.Registry) {
+	reg.Register(config.KindStateProvider, "memory", func(string, registry.RawConfig) (any, error) {
+		return &appTestStore{m: map[string][]byte{}}, nil
+	})
+}
+
+func TestBuildStatefulSessionReadThrough(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	registerMemoryStore(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "0123456789abcdef0123456789abcdef" }
+  stateProvider: { type: memory }
+---
+kind: Route
+metadata: { name: spa, labels: { x: y } }
+spec: { match: /app/, type: app, handler: { type: echo-user }, policy: { auth: required } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Session == nil {
+		t.Fatal("stateful Session manager not built")
+	}
+	// mint a server-side session via the built manager, then read it back through the route
+	wr := httptest.NewRecorder()
+	mintReq := httptest.NewRequest("GET", "/", nil)
+	mintReq.Header.Set("User-Agent", "UA")
+	if err := a.Session.Issue(wr, mintReq, &idp.Identity{Subject: "u-1"},
+		map[string]any{"email": "a@b.co"}, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/app/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range wr.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("authed stateful read status = %d, want 200", rec.Code)
+	}
+	// echo-user writes "X-User-Id|X-User-Groups"; no identity.groups is configured
+	// here, so the groups half is empty ⇒ "u-1|".
+	if rec.Body.String() != "u-1|" {
+		t.Fatalf("projected body = %q, want \"u-1|\"", rec.Body.String())
+	}
+}
+
+func TestBuildStatefulUnknownTypeFails(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "0123456789abcdef0123456789abcdef" }
+  stateProvider: { type: nope }
+---
+kind: Route
+metadata: { name: r }
+spec: { match: /x/, type: app, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("Build must fail when stateProvider type is not registered")
+	}
+}
+
+func TestBuildStateProviderRequiresSessionBlock(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	registerMemoryStore(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  stateProvider: { type: memory }
+---
+kind: Route
+metadata: { name: r }
+spec: { match: /x/, type: app, handler: { type: echo-user } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("Build must fail when stateProvider is set without a session block")
 	}
 }

@@ -19,11 +19,10 @@ var (
 // (e.g. the auth package's login cookie) that share the same key.
 var sessionAAD = []byte("hog/session/v1")
 
-// Manager builds, seals, reads, and clears sessions. The cookie implementation
-// is stateless; a Valkey-backed implementation (same interface) arrives in #5.
+// Manager builds, persists, reads, and clears sessions. The cookie implementation
+// is stateless; the server-side implementation arrives in statemanager.go (#5).
 type Manager interface {
-	New(idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens, r *http.Request) *Session
-	Write(w http.ResponseWriter, r *http.Request, s *Session) error
+	Issue(w http.ResponseWriter, r *http.Request, idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens) error
 	Read(r *http.Request) (*Session, error)
 	Clear(w http.ResponseWriter, r *http.Request)
 }
@@ -42,21 +41,24 @@ func NewManager(cfg Config) (Manager, error) {
 	return &cookieManager{cfg: cfg, sealer: s}, nil
 }
 
-func (m *cookieManager) New(idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens, r *http.Request) *Session {
+// makeSession assembles the in-memory Session from a verified identity, optional
+// userinfo, the tokens, and the request (for the fingerprint). Shared by the cookie manager and the upcoming state manager.
+func makeSession(cfg Config, idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens, r *http.Request) Session {
 	now := time.Now()
-	return &Session{
+	return Session{
 		Subject:     idt.Subject,
-		Passport:    projectPassport(m.cfg.PassportClaims, idt.Claims, userinfo),
-		Groups:      projectGroups(m.cfg.Groups, userinfo, idt.Claims),
-		AccessToken: tok.AccessToken, // tok.RefreshToken intentionally discarded (server-side-only, #5)
-		Expiry:      now.Add(m.cfg.TTL),
+		Passport:    projectPassport(cfg.PassportClaims, idt.Claims, userinfo),
+		Groups:      projectGroups(cfg.Groups, userinfo, idt.Claims),
+		AccessToken: tok.AccessToken, // refresh token intentionally NOT stored in the cookie
+		Expiry:      now.Add(cfg.TTL),
 		IssuedAt:    now,
-		Fingerprint: computeFingerprint(m.cfg.FingerprintHeaders, r),
+		Fingerprint: computeFingerprint(cfg.FingerprintHeaders, r),
 	}
 }
 
-func (m *cookieManager) Write(w http.ResponseWriter, r *http.Request, s *Session) error {
-	payload, err := json.Marshal(s)
+func (m *cookieManager) Issue(w http.ResponseWriter, r *http.Request, idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens) error {
+	s := makeSession(m.cfg, idt, userinfo, tok, r)
+	payload, err := json.Marshal(&s)
 	if err != nil {
 		return err
 	}

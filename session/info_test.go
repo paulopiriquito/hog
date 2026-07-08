@@ -18,7 +18,9 @@ func TestInfoHandler(t *testing.T) {
 	tok := &idp.Tokens{AccessToken: "at-secret", Expiry: time.Now().Add(time.Hour)}
 	wr := httptest.NewRecorder()
 	rq := login(httptest.NewRequest("GET", "/auth/session", nil))
-	_ = m.Write(wr, rq, m.New(idt, map[string]any{"email": "a@b.co"}, tok, rq))
+	if err := m.Issue(wr, rq, idt, map[string]any{"email": "a@b.co"}, tok); err != nil {
+		t.Fatal(err)
+	}
 
 	rq2 := login(httptest.NewRequest("GET", "/auth/session", nil))
 	for _, c := range wr.Result().Cookies() {

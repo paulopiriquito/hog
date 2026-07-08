@@ -35,6 +35,7 @@ const (
 	KindResponsePlugin  = "ResponsePlugin"
 	KindTerminalHandler = "TerminalHandler"
 	KindIdP             = "IdP"
+	KindStateProvider   = "StateProvider"
 )
 
 // DecodeAll decodes a multi-document YAML stream into resources, skipping

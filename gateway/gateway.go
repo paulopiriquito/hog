@@ -16,9 +16,10 @@ type Settings struct {
 	OTELPort       string    `yaml:"otelPort"`
 	TrustedProxies []string  `yaml:"trustedProxies"`
 	Plugins        []string  `yaml:"plugins"`
-	Session        yaml.Node `yaml:"session"`  // raw; parsed by the session package
-	Identity       yaml.Node `yaml:"identity"` // raw; parsed by the session package (ParseIdentity)
-	Auth           yaml.Node `yaml:"auth"`     // raw; parsed by the auth package
+	Session        yaml.Node `yaml:"session"`       // raw; parsed by the session package
+	Identity       yaml.Node `yaml:"identity"`      // raw; parsed by the session package (ParseIdentity)
+	Auth           yaml.Node `yaml:"auth"`          // raw; parsed by the auth package
+	StateProvider  yaml.Node `yaml:"stateProvider"` // raw; parsed by the session package (ParseStateProvider)
 }
 
 // FromResource decodes a Gateway resource's spec, applying defaults.

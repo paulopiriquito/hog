@@ -45,17 +45,7 @@ func TestManagerRoundTripAndDiscardsRefreshToken(t *testing.T) {
 
 	wr := httptest.NewRecorder()
 	rq := login(httptest.NewRequest("GET", "/", nil))
-	s := m.New(idt, userinfo, tok, rq)
-	if s.Subject != "u-9" || s.Passport["email"] != "alice@x.co" || s.Passport["name"] != "Alice" {
-		t.Fatalf("session = %+v", s)
-	}
-	if len(s.Groups) != 1 || s.Groups[0] != "PT-LM-ROLE-app-admin" {
-		t.Fatalf("groups = %v", s.Groups)
-	}
-	if s.AccessToken != "at" {
-		t.Fatalf("access token = %q", s.AccessToken)
-	}
-	if err := m.Write(wr, rq, s); err != nil {
+	if err := m.Issue(wr, rq, idt, userinfo, tok); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range wr.Result().Cookies() {
@@ -71,8 +61,11 @@ func TestManagerRoundTripAndDiscardsRefreshToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got.Subject != "u-9" || got.AccessToken != "at" || got.Passport["email"] != "alice@x.co" {
+	if got.Subject != "u-9" || got.AccessToken != "at" || got.Passport["email"] != "alice@x.co" || got.Passport["name"] != "Alice" {
 		t.Fatalf("read session = %+v", got)
+	}
+	if len(got.Groups) != 1 || got.Groups[0] != "PT-LM-ROLE-app-admin" {
+		t.Fatalf("groups = %v", got.Groups)
 	}
 }
 
@@ -89,27 +82,29 @@ func TestManagerReadErrors(t *testing.T) {
 }
 
 func TestManagerExpiredAndFingerprintMismatch(t *testing.T) {
-	m := testManager(t, nil)
 	idt := &idp.Identity{Subject: "u-1"}
 	tok := &idp.Tokens{AccessToken: "at"}
 
+	mExp := testManager(t, func(c *Config) { c.TTL = -time.Minute })
 	wr := httptest.NewRecorder()
 	rq := login(httptest.NewRequest("GET", "/", nil))
-	s := m.New(idt, nil, tok, rq)
-	s.Expiry = time.Now().Add(-time.Minute)
-	_ = m.Write(wr, rq, s)
+	if err := mExp.Issue(wr, rq, idt, nil, tok); err != nil {
+		t.Fatal(err)
+	}
 	rq2 := login(httptest.NewRequest("GET", "/", nil))
 	for _, c := range wr.Result().Cookies() {
 		rq2.AddCookie(c)
 	}
-	if _, err := m.Read(rq2); !errors.Is(err, ErrInvalidSession) {
+	if _, err := mExp.Read(rq2); !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("expired want ErrInvalidSession, got %v", err)
 	}
 
+	m := testManager(t, nil)
 	wr2 := httptest.NewRecorder()
 	rqA := login(httptest.NewRequest("GET", "/", nil))
-	s2 := m.New(idt, nil, tok, rqA)
-	_ = m.Write(wr2, rqA, s2)
+	if err := m.Issue(wr2, rqA, idt, nil, tok); err != nil {
+		t.Fatal(err)
+	}
 	rqB := httptest.NewRequest("GET", "/", nil)
 	rqB.Header.Set("User-Agent", "curl/8")
 	for _, c := range wr2.Result().Cookies() {

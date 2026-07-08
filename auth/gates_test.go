@@ -34,9 +34,10 @@ func sessionWithCookie(t *testing.T) (session.Manager, []*http.Cookie) {
 	wr := httptest.NewRecorder()
 	rq := httptest.NewRequest("GET", "/", nil)
 	rq.Header.Set("User-Agent", "UA")
-	s := m.New(&idp.Identity{Subject: "u-1", Claims: map[string]any{"email": "a@b.co"}},
-		nil, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}, rq)
-	_ = m.Write(wr, rq, s)
+	if err := m.Issue(wr, rq, &idp.Identity{Subject: "u-1", Claims: map[string]any{"email": "a@b.co"}},
+		nil, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	return m, wr.Result().Cookies()
 }
 

@@ -137,7 +137,7 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
-	sess, sessCfg, err := buildSession(cfg.Gateway, idCfg)
+	sess, sessCfg, err := buildSession(cfg.Gateway, idCfg, reg, active)
 	if err != nil {
 		return nil, err
 	}
@@ -250,11 +250,16 @@ func combine(a, b chain.Middleware) chain.Middleware {
 	return chain.Func(func(next http.Handler) http.Handler { return a.Wrap(b.Wrap(next)) })
 }
 
-// buildSession constructs the session Manager from the Gateway's raw session
-// block, applying the identity model (passport claims + groups) from idCfg. An
-// absent block ⇒ nil manager; a present block with a bad key ⇒ fail-fast.
-func buildSession(g gateway.Settings, idCfg session.IdentityConfig) (session.Manager, *session.Config, error) {
+// buildSession constructs the session Manager: a server-side stateManager when a
+// stateProvider block is configured (the IdP is threaded in for silent refresh),
+// else the stateless cookie manager. An absent session block ⇒ nil manager (or an
+// error if a stateProvider is set without one). A bad session key, an unknown
+// stateProvider type, or store-construction failure all fail-fast.
+func buildSession(g gateway.Settings, idCfg session.IdentityConfig, reg *registry.Registry, active idp.IdP) (session.Manager, *session.Config, error) {
 	if g.Session.Kind == 0 {
+		if g.StateProvider.Kind != 0 {
+			return nil, nil, fmt.Errorf("stateProvider is configured but no session block is present (the session key encrypts the at-rest record)")
+		}
 		return nil, nil, nil
 	}
 	cfg, err := session.FromYAML(g.Session)
@@ -263,6 +268,27 @@ func buildSession(g gateway.Settings, idCfg session.IdentityConfig) (session.Man
 	}
 	cfg.PassportClaims = idCfg.Claims
 	cfg.Groups = idCfg.Groups
+
+	if g.StateProvider.Kind != 0 {
+		spc, err := session.ParseStateProvider(g.StateProvider)
+		if err != nil {
+			return nil, nil, err
+		}
+		raw, err := reg.Build(config.KindStateProvider, spc.Type, registry.RawConfig{Node: spc.Config})
+		if err != nil {
+			return nil, nil, fmt.Errorf("stateProvider %q: %w", spc.Type, err)
+		}
+		store, ok := raw.(session.StateStore)
+		if !ok {
+			return nil, nil, fmt.Errorf("stateProvider %q is not a session.StateStore", spc.Type)
+		}
+		m, err := session.NewStateManager(cfg, store, active, spc.RefreshSkew, spc.KeyPrefix)
+		if err != nil {
+			return nil, nil, fmt.Errorf("stateProvider %q: %w", spc.Type, err)
+		}
+		return m, &cfg, nil
+	}
+
 	m, err := session.NewManager(cfg)
 	if err != nil {
 		return nil, nil, err
