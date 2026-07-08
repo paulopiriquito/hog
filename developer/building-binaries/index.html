@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1086,6 +1084,8 @@
       
         
       
+        
+      
     
     
     
@@ -1183,6 +1183,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -1624,6 +1652,17 @@
     <span class="md-ellipsis">
       
         Verifying the result
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rendering-config-with-kustomize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering config with kustomize
       
     </span>
   </a>
@@ -2261,6 +2300,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#rendering-config-with-kustomize" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rendering config with kustomize
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2372,6 +2422,19 @@ step for your own files; only the binary itself is generated.</p>
 (<code>./hog --config gateway.yaml</code>) and confirm the routes backed by your plugins
 respond as expected. See <a href="../testing/">Testing plugins</a> for how to automate
 this as part of your plugin's own test suite.</p>
+<h2 id="rendering-config-with-kustomize">Rendering config with kustomize<a class="headerlink" href="#rendering-config-with-kustomize" title="Anchor link to this section">&para;</a></h2>
+<p>The <code>hog-builder</code> image includes <code>kustomize</code>, so if you manage your config
+as a <code>kustomize</code> base + per-environment overlays (see
+<a href="../../operations/kustomize/">operations: rendering config with kustomize</a>),
+you can render the overlay and feed it straight to <code>hog-build</code> in the same
+build stage — no extra base image, no separate render step in CI:</p>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-builder:v2.0.0</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">build</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">COPY</span><span class="w"> </span>config/<span class="w"> </span>./config/
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">RUN</span><span class="w"> </span>kustomize<span class="w"> </span>build<span class="w"> </span>config/overlays/prod<span class="w"> </span>&gt;<span class="w"> </span>/out/gateway.yaml
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">RUN</span><span class="w"> </span>hog-build<span class="w"> </span>--config<span class="w"> </span>/out/gateway.yaml<span class="w"> </span>-o<span class="w"> </span>/out/hog
+</span></code></pre></div>
+<p>See <a href="../../operations/kustomize/">operations: rendering config with kustomize</a>
+for the base/overlay layout and a complete worked example.</p>
 
 
 

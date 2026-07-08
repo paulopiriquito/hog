@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1086,6 +1084,8 @@
       
         
       
+        
+      
     
     
     
@@ -1183,6 +1183,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -2404,9 +2432,11 @@ client ID, a token, or a redirect.</p>
   secret, and <code>http://localhost:8080/auth/callback</code> registered as a
   redirect URL.</li>
 <li>Node.js (for the Vite build) and Docker.</li>
-<li>The <code>hog-runtime</code> image built locally, as in
-  <a href="../quickstart-static/">Serve a static site</a>
-  (<code>docker build -f build/Dockerfile.runtime -t hog-runtime .</code>).</li>
+<li>The <code>hog-runtime</code> image, pulled straight from GHCR (no local build
+  needed) — <code>docker pull ghcr.io/paulopiriquito/hog-runtime:v2.0.0</code>, or
+  just let <code>docker build</code> pull it on demand. See
+  <a href="../../operations/installation/">Installation and images</a> for the
+  full image family.</li>
 </ul>
 </div>
 <h2 id="folder-structure">Folder structure<a class="headerlink" href="#folder-structure" title="Anchor link to this section">&para;</a></h2>
@@ -2513,7 +2543,8 @@ so you have something to observe once you're logged in:</p>
 </ul>
 <h2 id="3-write-the-dockerfile">3. Write the Dockerfile<a class="headerlink" href="#3-write-the-dockerfile" title="Anchor link to this section">&para;</a></h2>
 <p>A multi-stage build: Node builds the Vite bundle, then it's copied onto
-<code>hog-runtime</code> next to the config:</p>
+<code>hog-runtime</code> — pulled straight from GHCR, no local build needed — next to
+the config:</p>
 <div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c"># syntax=docker/dockerfile:1</span>
 </span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="k">FROM</span><span class="w"> </span><span class="s">node:20-alpine</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">frontend-build</span>
 </span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="k">WORKDIR</span><span class="w"> </span><span class="s">/app</span>
@@ -2522,7 +2553,7 @@ so you have something to observe once you're logged in:</p>
 </span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="k">COPY</span><span class="w"> </span>frontend/<span class="w"> </span>.
 </span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="k">RUN</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>build
 </span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="k">FROM</span><span class="w"> </span><span class="s">hog-runtime</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-runtime:v2.0.0</span>
 </span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="k">COPY</span><span class="w"> </span>--from<span class="o">=</span>frontend-build<span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>/app/dist<span class="w"> </span>/srv/web
 </span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>gateway.yaml<span class="w"> </span>/etc/hog/gateway.yaml
 </span></code></pre></div>

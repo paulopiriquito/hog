@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1086,6 +1084,8 @@
       
         
       
+        
+      
     
     
     
@@ -1183,6 +1183,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -1791,10 +1819,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-build-the-base-images" class="md-nav__link">
+  <a href="#1-pull-the-published-images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Build the base images
+        1. Pull the published images
       
     </span>
   </a>
@@ -2240,10 +2268,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#1-build-the-base-images" class="md-nav__link">
+  <a href="#1-pull-the-published-images" class="md-nav__link">
     <span class="md-ellipsis">
       
-        1. Build the base images
+        1. Pull the published images
       
     </span>
   </a>
@@ -2333,11 +2361,10 @@ turns off SPA fallback so a genuinely missing page still <code>404</code>s.</p>
 <div class="admonition note">
 <p class="admonition-title">Prerequisites</p>
 <ul>
-<li>Docker.</li>
-<li>A local clone of the HOG repository. The <code>hog-runtime</code>/<code>hog-static</code>
-  image family isn't published to a registry yet (see
-  <a href="https://github.com/paulopiriquito/hog/blob/v2/docs/delivery.md">Delivering HOG</a>),
-  so you build them once, locally, from the repo root.</li>
+<li>Docker. The images used below are pulled straight from GHCR — no
+  local build or repository clone needed. See
+  <a href="../../operations/installation/">Installation and images</a> for the
+  full image family.</li>
 </ul>
 </div>
 <h2 id="folder-structure">Folder structure<a class="headerlink" href="#folder-structure" title="Anchor link to this section">&para;</a></h2>
@@ -2348,17 +2375,19 @@ turns off SPA fallback so a genuinely missing page still <code>404</code>s.</p>
 </span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   └── styles.css
 </span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>└── Dockerfile
 </span></code></pre></div>
-<h2 id="1-build-the-base-images">1. Build the base images<a class="headerlink" href="#1-build-the-base-images" title="Anchor link to this section">&para;</a></h2>
-<p>From the repository root, build <code>hog-runtime</code> first — <code>hog-static</code> is
-layered on top of it and won't resolve until the tag exists:</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>build/Dockerfile.runtime<span class="w"> </span>-t<span class="w"> </span>hog-runtime<span class="w"> </span>.
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>build/Dockerfile.static<span class="w">  </span>-t<span class="w"> </span>hog-static<span class="w">  </span>.
+<h2 id="1-pull-the-published-images">1. Pull the published images<a class="headerlink" href="#1-pull-the-published-images" title="Anchor link to this section">&para;</a></h2>
+<p>Both images used in this guide are published, multi-arch, to GHCR. Pull
+them ahead of time, or just let <code>docker build</code> pull them on demand when it
+hits the <code>FROM</code> line:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-static:v2.0.0
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 </span></code></pre></div>
 <div class="admonition success">
 <p class="admonition-title">Expected result</p>
 <p>Two local images: <code>hog-runtime</code> (the vanilla binary, non-root <code>hog</code>
 user, <code>/etc/hog</code> and <code>/srv/web</code> pre-created) and <code>hog-static</code> (that plus
-a baked-in SPA config and a placeholder <code>index.html</code>).</p>
+a baked-in SPA config and a placeholder <code>index.html</code>). Swap <code>:v2.0.0</code>
+for <code>:latest</code> to track the newest release instead of pinning.</p>
 </div>
 <h2 id="2-write-the-site-content">2. Write the site content<a class="headerlink" href="#2-write-the-site-content" title="Anchor link to this section">&para;</a></h2>
 <div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>static-site/site<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>static-site
@@ -2398,7 +2427,7 @@ a baked-in SPA config and a placeholder <code>index.html</code>).</p>
 <h2 id="3-the-simplest-path-layer-on-hog-static">3. The simplest path: layer on <code>hog-static</code><a class="headerlink" href="#3-the-simplest-path-layer-on-hog-static" title="Anchor link to this section">&para;</a></h2>
 <p><code>hog-static</code> already bakes in <code>/etc/hog/gateway.yaml</code> with a <code>static</code> route
 on <code>/</code> — there's no config to write. Create <code>Dockerfile</code>:</p>
-<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">hog-static</span>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-static:v2.0.0</span>
 </span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">COPY</span><span class="w"> </span>site/<span class="w"> </span>/srv/web/
 </span></code></pre></div>
 <p>Build it and run it read-only:</p>
@@ -2440,7 +2469,7 @@ typo'd or missing URL should <code>404</code>.</p>
 </span></code></pre></div>
 <p>Layer this on <code>hog-runtime</code> instead — the vanilla image, so you own the
 whole config:</p>
-<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">hog-runtime</span>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-runtime:v2.0.0</span>
 </span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>site/<span class="w"> </span>/srv/web/
 </span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>gateway.yaml<span class="w"> </span>/etc/hog/gateway.yaml
 </span></code></pre></div>

@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1086,6 +1084,8 @@
       
         
       
+        
+      
     
     
     
@@ -1183,6 +1183,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -2408,8 +2436,12 @@ route group.</p>
 <li>A JSON backend reachable at <code>http://backend:9000</code> — see
   <a href="../api-aggregation/">Aggregate multiple backends</a> for a two-line
   stand-in, or bring your own.</li>
-<li>Docker, and the <code>hog-runtime</code> image built locally, as in
-  <a href="../quickstart-static/">Serve a static site</a>.</li>
+<li>Docker, and the <code>hog-runtime</code> image — pulled straight from GHCR (no
+  local build needed):
+  <code>docker pull ghcr.io/paulopiriquito/hog-runtime:v2.0.0</code>, or just let
+  <code>docker build</code> pull it on demand. See
+  <a href="../../operations/installation/">Installation and images</a> for the
+  full image family.</li>
 </ul>
 </div>
 <h2 id="folder-structure">Folder structure<a class="headerlink" href="#folder-structure" title="Anchor link to this section">&para;</a></h2>
@@ -2521,22 +2553,40 @@ policy already let them through. Save this as <code>policies/writes.rego</code>:
   on the route doesn't override the narrower Rego rule.</li>
 </ul>
 <h2 id="3-write-the-dockerfile">3. Write the Dockerfile<a class="headerlink" href="#3-write-the-dockerfile" title="Anchor link to this section">&para;</a></h2>
-<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">hog-runtime</span>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-runtime:v2.0.0</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>gateway.yaml<span class="w"> </span>/etc/hog/gateway.yaml
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>policies/<span class="w">    </span>/etc/hog/policies/
 </span></code></pre></div>
+<div class="admonition tip">
+<p class="admonition-title">Rendering config with kustomize</p>
+<p>For a config that varies per environment (dev/staging/prod), keep a
+<code>base/</code> + <code>overlays/&lt;env&gt;/</code> kustomize layout instead of hand-editing
+<code>gateway.yaml</code>, and render it in a build stage with <code>hog-builder</code>
+(which ships <code>kustomize</code>) before handing the result to <code>hog-runtime</code>:</p>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-builder:v2.0.0</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="s">build</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">COPY</span><span class="w"> </span>config/<span class="w"> </span>/work/config/
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">WORKDIR</span><span class="w"> </span><span class="s">/work/config</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">RUN</span><span class="w"> </span>kustomize<span class="w"> </span>build<span class="w"> </span>overlays/prod<span class="w"> </span>&gt;<span class="w"> </span>/out/gateway.yaml
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-runtime:v2.0.0</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="k">COPY</span><span class="w"> </span>--from<span class="o">=</span>build<span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>/out/gateway.yaml<span class="w"> </span>/etc/hog/gateway.yaml
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="k">COPY</span><span class="w"> </span>--chown<span class="o">=</span>hog:hog<span class="w"> </span>policies/<span class="w"> </span>/etc/hog/policies/
+</span></code></pre></div>
+<p>See <a href="../../operations/kustomize/">Rendering config with kustomize</a> for
+the base/overlay layout and a full worked example.</p>
+</div>
 <h2 id="4-build-and-run-it">4. Build and run it<a class="headerlink" href="#4-build-and-run-it" title="Anchor link to this section">&para;</a></h2>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>api-gateway<span class="w"> </span>.
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SESSION_KEY</span><span class="o">=</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">16</span><span class="k">)</span>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_ISSUER</span><span class="o">=</span>https://idp.example.com
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_CLIENT_ID</span><span class="o">=</span>hog-example
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_CLIENT_SECRET</span><span class="o">=</span>your-client-secret
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>docker<span class="w"> </span>run<span class="w"> </span>--read-only<span class="w"> </span>--tmpfs<span class="w"> </span>/tmp<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="w">  </span>-e<span class="w"> </span>SESSION_KEY<span class="w"> </span>-e<span class="w"> </span>OIDC_ISSUER<span class="w"> </span>-e<span class="w"> </span>OIDC_CLIENT_ID<span class="w"> </span>-e<span class="w"> </span>OIDC_CLIENT_SECRET<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="w">  </span>api-gateway
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>api-gateway<span class="w"> </span>.
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">SESSION_KEY</span><span class="o">=</span><span class="k">$(</span>openssl<span class="w"> </span>rand<span class="w"> </span>-hex<span class="w"> </span><span class="m">16</span><span class="k">)</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_ISSUER</span><span class="o">=</span>https://idp.example.com
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_CLIENT_ID</span><span class="o">=</span>hog-example
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OIDC_CLIENT_SECRET</span><span class="o">=</span>your-client-secret
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>docker<span class="w"> </span>run<span class="w"> </span>--read-only<span class="w"> </span>--tmpfs<span class="w"> </span>/tmp<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="w">  </span>-e<span class="w"> </span>SESSION_KEY<span class="w"> </span>-e<span class="w"> </span>OIDC_ISSUER<span class="w"> </span>-e<span class="w"> </span>OIDC_CLIENT_ID<span class="w"> </span>-e<span class="w"> </span>OIDC_CLIENT_SECRET<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="w">  </span>api-gateway
 </span></code></pre></div>
 <div class="admonition success">
 <p class="admonition-title">Expected result</p>
@@ -2545,9 +2595,9 @@ policy already let them through. Save this as <code>policies/writes.rego</code>:
 <h2 id="5-send-an-allowed-request">5. Send an allowed request<a class="headerlink" href="#5-send-an-allowed-request" title="Anchor link to this section">&para;</a></h2>
 <p>A <code>GET</code> from a token whose subject is in <code>admins</code>: <code>admins</code> passes (group
 present), and <code>writes</code> never fires (<code>GET</code> isn't a write method).</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$ADMIN_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span>http://localhost:8080/api/admin/users
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$ADMIN_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>http://localhost:8080/api/admin/users
 </span></code></pre></div>
 <div class="admonition success">
 <p class="admonition-title">Expected result</p>
@@ -2556,22 +2606,22 @@ present), and <code>writes</code> never fires (<code>GET</code> isn't a write me
 <h2 id="6-send-two-denied-requests">6. Send two denied requests<a class="headerlink" href="#6-send-two-denied-requests" title="Anchor link to this section">&para;</a></h2>
 <p>A <code>GET</code> from a token in <code>staff</code> only, against the admin-only route, fails
 the route's own <code>admins</code> policy:</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$STAFF_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>http://localhost:8080/api/admin/users
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$STAFF_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>http://localhost:8080/api/admin/users
 </span></code></pre></div>
 <p>That same <code>staff</code> token passes <code>users-api</code>'s broader <code>staff</code> policy — but a
 <code>POST</code> there is still denied by the <code>writes</code> Rego rule, because the caller
 isn't in <code>admins</code>:</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$STAFF_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span>http://localhost:8080/api/users
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>curl<span class="w"> </span>-s<span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$STAFF_TOKEN</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span>http://localhost:8080/api/users
 </span></code></pre></div>
 <div class="admonition success">
 <p class="admonition-title">Expected result</p>
 <p>Both return <code>403 Forbidden</code> with a generic body — no policy name or
 reason. HOG logs which policy denied the request and why:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="s2">&quot;INFO&quot;</span><span class="p">,</span><span class="nt">&quot;msg&quot;</span><span class="p">:</span><span class="s2">&quot;authz denied&quot;</span><span class="p">,</span><span class="nt">&quot;policy&quot;</span><span class="p">:</span><span class="s2">&quot;admins&quot;</span><span class="p">,</span><span class="nt">&quot;reason&quot;</span><span class="p">:</span><span class="s2">&quot;require not satisfied&quot;</span><span class="p">,</span><span class="nt">&quot;subject&quot;</span><span class="p">:</span><span class="s2">&quot;staff-user&quot;</span><span class="p">,</span><span class="nt">&quot;route&quot;</span><span class="p">:</span><span class="s2">&quot;/api/admin/&quot;</span><span class="p">,</span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="s2">&quot;GET&quot;</span><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="p">{</span><span class="nt">&quot;time&quot;</span><span class="p">:</span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="nt">&quot;level&quot;</span><span class="p">:</span><span class="s2">&quot;INFO&quot;</span><span class="p">,</span><span class="nt">&quot;msg&quot;</span><span class="p">:</span><span class="s2">&quot;authz denied&quot;</span><span class="p">,</span><span class="nt">&quot;policy&quot;</span><span class="p">:</span><span class="s2">&quot;admins&quot;</span><span class="p">,</span><span class="nt">&quot;reason&quot;</span><span class="p">:</span><span class="s2">&quot;require not satisfied&quot;</span><span class="p">,</span><span class="nt">&quot;subject&quot;</span><span class="p">:</span><span class="s2">&quot;staff-user&quot;</span><span class="p">,</span><span class="nt">&quot;route&quot;</span><span class="p">:</span><span class="s2">&quot;/api/admin/&quot;</span><span class="p">,</span><span class="nt">&quot;method&quot;</span><span class="p">:</span><span class="s2">&quot;GET&quot;</span><span class="p">}</span>
 </span></code></pre></div>
 <p>(An <code>$ADMIN_TOKEN</code> <code>POST</code> to <code>/api/users</code> returns <code>200</code> — the same
 Rego rule allows writes once the caller <em>is</em> in <code>admins</code>.)</p>
@@ -2579,12 +2629,12 @@ Rego rule allows writes once the caller <em>is</em> in <code>admins</code>.)</p>
 <h2 id="where-groups-come-from">Where groups come from<a class="headerlink" href="#where-groups-come-from" title="Anchor link to this section">&para;</a></h2>
 <p><code>identity.groups</code> maps a claim on the ID token or userinfo response into
 the session's <code>Groups</code>, which authorization then reads:</p>
-<div class="language-yaml highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">identity</span><span class="p">:</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="nt">groups</span><span class="p">:</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups</span><span class="w">   </span><span class="c1"># claim name carrying the group list</span>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">admins</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">staff</span><span class="p p-Indicator">]</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">    </span><span class="nt">render</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dn</span><span class="w">        </span><span class="c1"># keep each value as-is</span>
-</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">as</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups</span><span class="w">        </span><span class="c1"># session field name (also the default X-User-Groups header)</span>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nt">identity</span><span class="p">:</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">groups</span><span class="p">:</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nt">source</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups</span><span class="w">   </span><span class="c1"># claim name carrying the group list</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span><span class="nt">match</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">admins</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">staff</span><span class="p p-Indicator">]</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">    </span><span class="nt">render</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">dn</span><span class="w">        </span><span class="c1"># keep each value as-is</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="w">    </span><span class="nt">as</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">groups</span><span class="w">        </span><span class="c1"># session field name (also the default X-User-Groups header)</span>
 </span></code></pre></div>
 <ul>
 <li><strong><code>source</code></strong> is the claim holding the array — a plain <code>groups: ["admins",

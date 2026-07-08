@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1193,6 +1191,8 @@
       
         
       
+        
+      
     
     
     
@@ -1290,6 +1290,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../operations/kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -2344,10 +2372,33 @@ preserved as <code>return_to</code>; a <code>service</code> route gets a <code>4
 identity and the request's attributes. Any policy that denies returns <code>403</code>.
 This stage runs independently of whether a session or IdP is configured at
 all, since a policy can match on request attributes alone.</p>
+<p>A deny short-circuits right there — no further stage runs, and the response
+body carries no policy detail (the reason is logged and recorded on the
+request span instead):</p>
+<pre class="mermaid"><code>sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  B-&gt;&gt;H: GET /admin (session groups = [viewers])
+  Note over H: authz: Policy require groups=[admins] → not satisfied
+  H--&gt;&gt;B: 403 forbidden (reason logged, not leaked)</code></pre>
 <p><strong>projection</strong> strips any inbound <code>X-User-*</code> headers as an anti-spoofing
 measure and, only when a principal is present in context, injects identity
 headers for the backend to trust: a subject header, a groups header, and
 either derived or explicitly mapped claim headers.</p>
+<p>Put together, a request that clears every gate looks like this — session
+resolves the <code>Principal</code>, auth-gate and authz let it through, and projection
+hands the backend a trustworthy identity instead of the raw cookie:</p>
+<pre class="mermaid"><code>sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  participant K as Backend
+  B-&gt;&gt;H: GET /api/orders (session cookie)
+  Note over H: session → Principal · auth-gate ✓ · authz ✓ · projection sets X-User-*
+  H-&gt;&gt;K: GET /orders (X-User-*, cookie stripped, optional Bearer)
+  K--&gt;&gt;H: 200 JSON
+  H--&gt;&gt;B: 200 JSON</code></pre>
 <h2 id="the-guarded-plugin-slots-and-the-terminal">The guarded plugin slots and the terminal<a class="headerlink" href="#the-guarded-plugin-slots-and-the-terminal" title="Anchor link to this section">&para;</a></h2>
 <p>Two more positions exist after the fixed per-route skeleton, both reserved
 for developer code and both selector-matched against the route's labels, in
@@ -2384,6 +2435,26 @@ aren't <code>Route</code> resources at all — they're mounted directly on the <
 and reached only through the gateway-wide edge layers above, never through
 the per-route skeleton (no <code>recover</code>/<code>request-id</code>/<code>access-log</code>/<code>session</code>/
 <code>auth-gate</code>/<code>authz</code>/<code>projection</code> around them).</p>
+<p>A full OIDC browser login exercises exactly those raw endpoints — a
+protected <code>app</code> route's <code>auth-gate</code> redirects to <code>/auth/login</code>, which is
+itself outside the per-route skeleton, before the round trip lands back on a
+now-authenticated request to the original route:</p>
+<pre class="mermaid"><code>sequenceDiagram
+  autonumber
+  participant B as Browser
+  participant H as HOG
+  participant I as OIDC IdP
+  B-&gt;&gt;H: GET /app (no session)
+  H--&gt;&gt;B: 302 → /auth/login
+  B-&gt;&gt;H: GET /auth/login
+  H--&gt;&gt;B: 302 → IdP authorize (PKCE + state)
+  B-&gt;&gt;I: authenticate
+  I--&gt;&gt;B: 302 → /auth/callback?code&amp;state
+  B-&gt;&gt;H: GET /auth/callback
+  H-&gt;&gt;I: exchange code, verify id_token
+  H--&gt;&gt;B: Set-Cookie (encrypted session); 302 → /app
+  B-&gt;&gt;H: GET /app (session cookie)
+  H--&gt;&gt;B: 200</code></pre>
 <h2 id="reserved-slots-activate-only-when-configured">Reserved slots activate only when configured<a class="headerlink" href="#reserved-slots-activate-only-when-configured" title="Anchor link to this section">&para;</a></h2>
 <p><code>session</code>, <code>auth-gate</code>, and <code>projection</code> come from <code>chain.Gates</code>, supplied by
 <code>app.Build</code>. When neither a <code>session</code> block nor an <code>IdP</code> resource is

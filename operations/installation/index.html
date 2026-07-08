@@ -22,7 +22,7 @@
         
       
       
-      <link rel="icon" href="../../assets/images/favicon.png">
+      <link rel="icon" href="../../assets/hog.svg">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
@@ -98,8 +98,7 @@
   <nav class="md-header__inner md-grid" aria-label="Header">
     <a href="../.." title="HOG" class="md-header__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     <label class="md-header__button md-icon" for="__drawer">
@@ -427,8 +426,7 @@
   <label class="md-nav__title" for="__drawer">
     <a href="../.." title="HOG" class="md-nav__button md-logo" aria-label="HOG" data-md-component="logo">
       
-  
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+  <img src="../../assets/hog.svg" alt="logo">
 
     </a>
     HOG
@@ -1088,6 +1086,8 @@
       
         
       
+        
+      
     
     
     
@@ -1244,6 +1244,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#building-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building from source
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1268,6 +1279,34 @@
     
   
     Configuration reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kustomize/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Rendering config with kustomize
   
 
     
@@ -2217,6 +2256,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#building-from-source" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Building from source
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2238,32 +2288,58 @@
 
 
 <h1 id="installation-and-images">Installation and images<a class="headerlink" href="#installation-and-images" title="Anchor link to this section">&para;</a></h1>
-<p>HOG ships as three layered Alpine images. Each is <code>FROM</code> the previous one, so
-you only build the layer you need.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>hog-builder  (FROM golang:1.26-alpine)
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>      │  hog source + compiled `hog-build`
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>      ▼
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>hog-runtime  (FROM alpine:3.21)
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>      │  vanilla `hog` binary, non-root user, entrypoint
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>      ▼
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>hog-static   (FROM hog-runtime)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>         baked SPA config + placeholder page
+<p>HOG ships as four Alpine images, published to
+<a href="https://ghcr.io">GHCR</a> as multi-arch builds (<code>linux/amd64</code> +
+<code>linux/arm64</code>), tagged both <code>latest</code> and with each release:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-runtime:v2.0.0
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-static:v2.0.0
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-builder:v2.0.0
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>docker<span class="w"> </span>pull<span class="w"> </span>ghcr.io/paulopiriquito/hog-docs:v2.0.0
 </span></code></pre></div>
-<ul>
-<li><strong><code>hog-runtime</code></strong> is the base every deployment ends up on: the vanilla
-  <code>hog</code> binary, a non-root <code>hog</code> user (uid/gid <code>10001</code>), <code>ca-certificates</code> +
-  <code>tzdata</code>, and <code>/etc/hog</code> + <code>/srv/web</code> pre-created and owned by <code>hog</code>.</li>
-<li><strong><code>hog-static</code></strong> is <code>hog-runtime</code> with a default single-page-app (SPA)
-  config and placeholder page baked in — an instant static server.</li>
-<li><strong><code>hog-builder</code></strong> is only needed to <em>compose</em> a custom binary with plugins
-  compiled in. See
-  <a href="../../developer/building-binaries/">developer: building a custom binary</a>.</li>
-</ul>
-<p>Build all three from the repository root (the build context each Dockerfile
-expects):</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>build/Dockerfile.builder<span class="w"> </span>-t<span class="w"> </span>hog-builder<span class="w"> </span>.
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>build/Dockerfile.runtime<span class="w"> </span>-t<span class="w"> </span>hog-runtime<span class="w"> </span>.<span class="w">   </span><span class="c1"># hog-static depends on this tag</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>docker<span class="w"> </span>build<span class="w"> </span>-f<span class="w"> </span>build/Dockerfile.static<span class="w">  </span>-t<span class="w"> </span>hog-static<span class="w">  </span>.
+<p>Swap <code>:v2.0.0</code> for <code>:latest</code> to track the newest release instead of pinning.
+You rarely need to <code>docker pull</code> explicitly — referencing an image in a
+<code>FROM</code> line is enough; <code>docker build</code> pulls it on demand.</p>
+<table>
+<thead>
+<tr>
+<th>Image</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ghcr.io/paulopiriquito/hog-runtime</code></td>
+<td>The base every deployment ends up on: the vanilla <code>hog</code> binary, a non-root <code>hog</code> user (uid/gid <code>10001</code>), <code>ca-certificates</code> + <code>tzdata</code>, and <code>/etc/hog</code> + <code>/srv/web</code> pre-created and owned by <code>hog</code>.</td>
+</tr>
+<tr>
+<td><code>ghcr.io/paulopiriquito/hog-static</code></td>
+<td><code>hog-runtime</code> with a default single-page-app (SPA) config and placeholder page baked in — an instant static server.</td>
+</tr>
+<tr>
+<td><code>ghcr.io/paulopiriquito/hog-builder</code></td>
+<td>A Go build environment carrying the HOG source, for composing a custom binary with plugins compiled in. See <a href="../../developer/building-binaries/">developer: building a custom binary</a>.</td>
+</tr>
+<tr>
+<td><code>ghcr.io/paulopiriquito/hog-docs</code></td>
+<td>This documentation site, baked onto <code>hog-static</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The four are layered — <code>hog-static</code> is <code>FROM hog-runtime</code>, <code>hog-docs</code> is
+<code>FROM hog-static</code> — but each is published as a complete, independently
+pullable image. You never need to build or pull the layer underneath the
+one you use.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>hog-builder  (FROM golang:1.26-alpine)
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>      │  hog source + compiled `hog-build`
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>      ▼
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>hog-runtime  (FROM alpine:3.21)
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>      │  vanilla `hog` binary, non-root user, entrypoint
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>      ▼
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>hog-static   (FROM hog-runtime)
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>      │  baked SPA config + placeholder page
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>      ▼
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>hog-docs     (FROM hog-static)
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>         this documentation site
 </span></code></pre></div>
 <h2 id="running-the-vanilla-runtime">Running the vanilla runtime<a class="headerlink" href="#running-the-vanilla-runtime" title="Anchor link to this section">&para;</a></h2>
 <p><code>hog-runtime</code>'s entrypoint is fixed:</p>
@@ -2276,14 +2352,14 @@ expects):</p>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span><span class="se">\</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">/config:/etc/hog:ro&quot;</span><span class="w"> </span><span class="se">\</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">  </span>-v<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$PWD</span><span class="s2">/dist:/srv/web:ro&quot;</span><span class="w"> </span><span class="se">\</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>hog-runtime
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">  </span>ghcr.io/paulopiriquito/hog-runtime:v2.0.0
 </span></code></pre></div>
 <h2 id="the-spa-out-of-the-box-hog-static">The SPA out of the box: <code>hog-static</code><a class="headerlink" href="#the-spa-out-of-the-box-hog-static" title="Anchor link to this section">&para;</a></h2>
 <p><code>hog-static</code> already has <code>/etc/hog/gateway.yaml</code> (a <code>Gateway</code> + a public
 <code>static</code> route serving <code>/srv/web</code>) and a placeholder <code>/srv/web/index.html</code>
 baked in. Replace the placeholder with your build output and you have a
 secured static server with no config to write:</p>
-<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">hog-static</span>
+<div class="language-dockerfile highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">FROM</span><span class="w"> </span><span class="s">ghcr.io/paulopiriquito/hog-static:v2.0.0</span>
 </span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">COPY</span><span class="w"> </span>dist/<span class="w"> </span>/srv/web/
 </span></code></pre></div>
 <div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>my-spa<span class="w"> </span>.
@@ -2297,7 +2373,7 @@ relying on the baked-in default — see the
 <p>HOG is stateless, so nothing it does at runtime requires a writable
 filesystem. <code>hog-runtime</code> and <code>hog-static</code> already run as the non-root <code>hog</code>
 user by default; run the container with a read-only root filesystem too:</p>
-<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--read-only<span class="w"> </span>--tmpfs<span class="w"> </span>/tmp<span class="w"> </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span>hog-static
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>docker<span class="w"> </span>run<span class="w"> </span>--read-only<span class="w"> </span>--tmpfs<span class="w"> </span>/tmp<span class="w"> </span>-p<span class="w"> </span><span class="m">8080</span>:8080<span class="w"> </span>ghcr.io/paulopiriquito/hog-static:v2.0.0
 </span></code></pre></div>
 <p><code>--tmpfs /tmp</code> covers any scratch-directory expectations (none of the
 built-in modules need one today, but it costs nothing to allow). Mount your
@@ -2310,6 +2386,19 @@ image. See <a href="../security/">security hardening</a> for the full checklist.
 <a href="../../developer/building-binaries/">developer: building a custom binary</a>
 for the two-stage <code>hog-builder</code> → <code>hog-runtime</code> build.</p>
 </div>
+<h2 id="building-from-source">Building from source<a class="headerlink" href="#building-from-source" title="Anchor link to this section">&para;</a></h2>
+<p>Most users should pull the published images above. Contributors — or
+anyone who needs an image built from a specific commit rather than a
+tagged release — can build the whole family locally from the repository
+root with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>make<span class="w"> </span>images<span class="w">   </span><span class="c1"># REGISTRY=ghcr.io/paulopiriquito TAG=dev by default</span>
+</span></code></pre></div>
+<p>which builds <code>hog-builder</code>, then <code>hog-runtime</code>, then layers <code>hog-static</code> on
+top of it and <code>hog-docs</code> on top of that — the same chain and the same
+Dockerfiles (<code>build/Dockerfile.{builder,runtime,static}</code>,
+<code>website/Dockerfile</code>) the published GHCR images are built from. Override
+<code>REGISTRY</code>/<code>TAG</code> to build under different names, e.g.
+<code>make images REGISTRY=myrepo TAG=local</code>.</p>
 
 
 
