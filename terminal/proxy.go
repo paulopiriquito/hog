@@ -13,6 +13,7 @@ import (
 
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/telemetry"
 )
 
 // proxyConfig is the decoded handler config for `type: reverse-proxy`.
@@ -46,9 +47,9 @@ func registerProxy(reg *registry.Registry) {
 				return nil, fmt.Errorf("reverse-proxy %q: timeout: %w", name, err)
 			}
 		}
-		var transport http.RoundTripper = sharedTransport
+		transport := backendRoundTripper // shared verifying + instrumented
 		if pc.InsecureSkipVerify {
-			transport = insecureTransport()
+			transport = telemetry.InstrumentedTransport(insecureTransport())
 		}
 		opts := forwardOptions{forwardAccessToken: pc.ForwardAccessToken, forwardCookies: pc.ForwardCookies}
 		rp := &httputil.ReverseProxy{
@@ -66,6 +67,7 @@ func registerProxy(reg *registry.Registry) {
 					pr.Out.Host = target.Host
 				}
 				prepareBackendRequest(pr.Out, pr.In, opts)
+				pr.Out = pr.Out.WithContext(telemetry.WithBackend(pr.Out.Context(), target.Host))
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				code := http.StatusBadGateway

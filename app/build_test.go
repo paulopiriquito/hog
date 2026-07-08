@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +22,13 @@ import (
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/session"
 	"github.com/paulopiriquito/hog/terminal"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestParse(t *testing.T) {
@@ -237,6 +246,53 @@ func TestParseRejectsUnknownKind(t *testing.T) {
 	rs := mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n---\nkind: Wat\nmetadata: {name: x}\nspec: {}\n")
 	if _, err := Parse(rs); err == nil {
 		t.Fatal("want error for unknown resource kind")
+	}
+}
+
+func TestParseTelemetryDefaultsWhenAbsent(t *testing.T) {
+	cfg, err := Parse(mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Telemetry.Service.Name != "hog" || cfg.Telemetry.LogLevel != "info" {
+		t.Fatalf("telemetry defaults = %+v", cfg.Telemetry)
+	}
+}
+
+func TestParseTelemetryResource(t *testing.T) {
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Telemetry
+metadata: { name: t }
+spec:
+  service: { name: edge }
+  accessLog: { properties: [method, session_id] }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Telemetry.Service.Name != "edge" {
+		t.Fatalf("service = %q", cfg.Telemetry.Service.Name)
+	}
+	if len(cfg.Telemetry.AccessLog.Properties) != 2 {
+		t.Fatalf("properties = %v", cfg.Telemetry.AccessLog.Properties)
+	}
+}
+
+func TestParseRejectsDuplicateTelemetry(t *testing.T) {
+	_, err := Parse(mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n---\nkind: Telemetry\nmetadata: {name: a}\nspec: {service: {name: x}}\n---\nkind: Telemetry\nmetadata: {name: b}\nspec: {service: {name: y}}\n"))
+	if err == nil {
+		t.Fatal("want error on duplicate Telemetry")
+	}
+}
+
+func TestParseRejectsTelemetryMissingService(t *testing.T) {
+	_, err := Parse(mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n---\nkind: Telemetry\nmetadata: {name: a}\nspec: {logLevel: info}\n"))
+	if err == nil {
+		t.Fatal("want error when service.name missing")
 	}
 }
 
@@ -978,4 +1034,380 @@ spec:
 	if rec.Body.String() != `{"org":{"v":1}}`+"\n" { // json.Encoder appends a newline
 		t.Fatalf("api route body = %q", rec.Body.String())
 	}
+}
+
+func TestBuildServerSpanNamedByRoute(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: hc }
+spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "http://h/health", nil))
+	spans := rec.Ended()
+	if len(spans) == 0 {
+		t.Fatal("no server span")
+	}
+	// otelhttp v0.69.0 renames the server span itself once r.Pattern is populated
+	// by ServeMux dispatch (internal/semconv.HTTPServer.SpanName: "{METHOD}
+	// {route}"). The span name and http.route attribute come entirely from
+	// otelhttp's own server instrumentation — HOG does not set either.
+	named := false
+	for _, s := range spans {
+		if s.Name() == "GET /health" {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("no server span named %q; got %v", "GET /health", spanNames(spans))
+	}
+}
+
+func TestBuildRecoverMarksSpanError(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	reg := registry.New()
+	terminal.Register(reg)
+	reg.Register(config.KindTerminalHandler, "boom", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { panic("boom") }), nil
+	})
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: b }
+spec: { match: /boom, handler: { type: boom }, policy: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rw, httptest.NewRequest("GET", "http://h/boom", nil))
+	if rw.Code != 500 {
+		t.Fatalf("status = %d, want 500", rw.Code)
+	}
+	spans := rec.Ended()
+	errored := false
+	for _, s := range spans {
+		if s.Status().Code == codes.Error {
+			errored = true
+		}
+	}
+	if !errored {
+		t.Fatal("panic did not mark a span error")
+	}
+}
+
+// TestBuildAccessLogCarriesServiceAndConfiguredProperties verifies the
+// service-decorated logger reaches the configured, trace-correlated access-log
+// middleware wired into the skeleton: every access line carries the
+// telemetry.Service.Name as `service`, plus the configured properties.
+func TestBuildAccessLogCarriesServiceAndConfiguredProperties(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Telemetry
+metadata: { name: t }
+spec:
+  service: { name: edge }
+  accessLog: { properties: [method, status] }
+---
+kind: Route
+metadata: { name: hc }
+spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, logger)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://h/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	var line map[string]any
+	found := false
+	for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if l == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("log line not JSON: %v (%s)", err, l)
+		}
+		if m["msg"] == "access" {
+			line = m
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no access log line found in output: %s", buf.String())
+	}
+	if line["service"] != "edge" {
+		t.Fatalf("service = %v, want edge", line["service"])
+	}
+	if line["method"] != "GET" {
+		t.Fatalf("method = %v, want GET", line["method"])
+	}
+	if line["status"] != float64(200) {
+		t.Fatalf("status = %v, want 200", line["status"])
+	}
+}
+
+// TestBuildAccessLogAllowsStreamingFlush proves the wrapper chain built by the
+// skeleton — otelhttp server handler → recover/request-id/access-log →
+// terminal — stays flush-transparent, so httputil.ReverseProxy's
+// FlushInterval:-1 SSE streaming (and websocket Hijack, which travels the same
+// http.ResponseController/Unwrap path) reach the real ResponseWriter through
+// the access-log wrapper. Without accessRecorder.Unwrap, ResponseController
+// stops at the access-log layer and Flush fails with ErrNotSupported.
+func TestBuildAccessLogAllowsStreamingFlush(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	reg.Register(config.KindTerminalHandler, "flushprobe", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			err := http.NewResponseController(w).Flush()
+			if err != nil {
+				io.WriteString(w, "flush-err: "+err.Error())
+				return
+			}
+			io.WriteString(w, "flush-ok")
+		}), nil
+	})
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: s }
+spec: { match: /s, handler: { type: flushprobe }, policy: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rw := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rw, httptest.NewRequest("GET", "http://h/s", nil))
+	if !strings.Contains(rw.Body.String(), "flush-ok") {
+		t.Fatalf("streaming flush broken through the chain: %q", rw.Body.String())
+	}
+}
+
+// TestBuildAccessLogRequestIDPresentForGeneratedIDs proves the request_id
+// access-log property is populated even when the client sends no
+// X-Request-Id: the request-id middleware (skeleton slot 2) generates one and
+// sets it on the response header before access-log (slot 3) runs, and the
+// access log reads it back via the recorder's response header.
+func TestBuildAccessLogRequestIDPresentForGeneratedIDs(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Telemetry
+metadata: { name: t }
+spec:
+  service: { name: edge }
+  accessLog: { properties: [request_id] }
+---
+kind: Route
+metadata: { name: hc }
+spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, logger)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	// No X-Request-Id set by the client: request-id middleware must generate one.
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "http://h/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+
+	var line map[string]any
+	found := false
+	for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+		if l == "" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal([]byte(l), &m); err != nil {
+			t.Fatalf("log line not JSON: %v (%s)", err, l)
+		}
+		if m["msg"] == "access" {
+			line = m
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no access log line found in output: %s", buf.String())
+	}
+	rid, _ := line["request_id"].(string)
+	if rid == "" {
+		t.Fatalf("request_id empty for generated id: %+v", line)
+	}
+}
+
+func spanNames(spans []sdktrace.ReadOnlySpan) []string {
+	var out []string
+	for _, s := range spans {
+		out = append(out, s.Name())
+	}
+	return out
+}
+
+// TestObservabilityEndToEnd proves the full telemetry stack works together
+// through the FULL built chain (otelhttp server handler → skeleton →
+// reverse-proxy terminal → instrumented backend transport):
+//  1. an inbound W3C traceparent is CONTINUED, so the server span and the
+//     child backend client span share the inbound trace id;
+//  2. the backend receives a W3C traceparent on that same trace;
+//  3. the access log line carries `service` and `trace_id`;
+//  4. a `http.server.request.duration` metric datapoint carries `http.route`
+//     set to the matched route pattern.
+func TestObservabilityEndToEnd(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	reader := sdkmetric.NewManualReader()
+	otel.SetMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	var backendTP string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendTP = r.Header.Get("traceparent")
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Telemetry
+metadata: { name: t }
+spec: { service: { name: edge } }
+---
+kind: Route
+metadata: { name: svc }
+spec:
+  match: /svc/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+`, stripPrefix: /svc }
+  policy: { auth: public }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "http://hog/svc/thing", nil)
+	req.Header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+	a.Handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	const traceID = "0af7651916cd43dd8448eb211c80319c"
+
+	// (2) backend received a traceparent on the same trace
+	if backendTP == "" || !strings.Contains(backendTP, traceID) {
+		t.Fatalf("backend traceparent = %q (want trace %s)", backendTP, traceID)
+	}
+	// (1) server + client spans, both on the inbound trace
+	spans := rec.Ended()
+	if len(spans) < 2 {
+		t.Fatalf("want server + client spans, got %d: %v", len(spans), spanNames(spans))
+	}
+	for _, s := range spans {
+		if s.SpanContext().TraceID().String() != traceID {
+			t.Fatalf("span %q on trace %s, want %s", s.Name(), s.SpanContext().TraceID(), traceID)
+		}
+	}
+	// (3) access log carries service + trace_id
+	if !bytes.Contains(buf.Bytes(), []byte(`"service":"edge"`)) ||
+		!bytes.Contains(buf.Bytes(), []byte(`"trace_id":"`+traceID+`"`)) {
+		t.Fatalf("access log missing service/trace_id: %s", buf.String())
+	}
+	// (4) server metric carries http.route
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	if !metricHasRoute(rm, "/svc/") {
+		t.Fatalf("no http.server.* metric with http.route=/svc/: %+v", rm)
+	}
+}
+
+// metricHasRoute reports whether any metric datapoint carries http.route=route.
+func metricHasRoute(rm metricdata.ResourceMetrics, route string) bool {
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if hist, ok := m.Data.(metricdata.Histogram[float64]); ok {
+				for _, dp := range hist.DataPoints {
+					if v, present := dp.Attributes.Value("http.route"); present && v.AsString() == route {
+						return true
+					}
+				}
+			}
+			if hist, ok := m.Data.(metricdata.Histogram[int64]); ok {
+				for _, dp := range hist.DataPoints {
+					if v, present := dp.Attributes.Value("http.route"); present && v.AsString() == route {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }

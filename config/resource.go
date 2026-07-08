@@ -36,6 +36,7 @@ const (
 	KindTerminalHandler = "TerminalHandler"
 	KindIdP             = "IdP"
 	KindStateProvider   = "StateProvider"
+	KindTelemetry       = "Telemetry"
 )
 
 // DecodeAll decodes a multi-document YAML stream into resources, skipping

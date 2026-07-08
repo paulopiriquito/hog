@@ -3,10 +3,14 @@ package chain
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // builtin pairs a stable name with its middleware, so the fixed skeleton order
@@ -24,17 +28,23 @@ type Gates struct {
 	Projection Middleware
 }
 
+// Observability supplies the telemetry-built middlewares for the reserved
+// observability slots. A nil AccessLog falls back to the default built-in.
+type Observability struct {
+	AccessLog Middleware // configured, trace-correlated access log
+}
+
 // Skeleton returns the fixed, ordered built-in middlewares that bracket every
 // route, with the supplied gates filling their reserved slots. Developer plugins
 // are appended AFTER this list by the app, so they can never run ahead of these
-// gates. recover/request-id/access-log are real; security and authz remain
-// reserved pass-throughs; session/auth-gate/projection use the supplied gates
-// (or reserved() when nil).
-func Skeleton(logger *slog.Logger, gates Gates) []Middleware {
+// gates. recover/request-id are always real; access-log uses obs (or its
+// default when nil); security and authz remain reserved pass-throughs;
+// session/auth-gate/projection use the supplied gates (or reserved() when nil).
+func Skeleton(logger *slog.Logger, gates Gates, obs Observability) []Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	bs := skeleton(logger, gates)
+	bs := skeleton(logger, gates, obs)
 	out := make([]Middleware, len(bs))
 	for i, b := range bs {
 		out[i] = b.mw
@@ -44,7 +54,7 @@ func Skeleton(logger *slog.Logger, gates Gates) []Middleware {
 
 // SkeletonNames returns the built-in names in chain order (outermost first).
 func SkeletonNames() []string {
-	bs := skeleton(slog.Default(), Gates{})
+	bs := skeleton(slog.Default(), Gates{}, Observability{})
 	names := make([]string, len(bs))
 	for i, b := range bs {
 		names[i] = b.name
@@ -52,11 +62,15 @@ func SkeletonNames() []string {
 	return names
 }
 
-func skeleton(logger *slog.Logger, gates Gates) []builtin {
+func skeleton(logger *slog.Logger, gates Gates, obs Observability) []builtin {
+	accessLog := obs.AccessLog
+	if accessLog == nil {
+		accessLog = accessLogMW(logger)
+	}
 	return []builtin{
 		{"recover", recoverMW(logger)},
 		{"request-id", requestIDMW()},
-		{"access-log", accessLogMW(logger)},
+		{"access-log", accessLog},
 		{"security", reserved()}, // CSRF + headers — implemented in BFF/security spec
 		{"session", orReserved(gates.Session)},
 		{"auth-gate", orReserved(gates.AuthGate)},
@@ -83,11 +97,13 @@ func recoverMW(logger *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if v := recover(); v != nil {
+					span := trace.SpanFromContext(r.Context())
+					span.RecordError(fmt.Errorf("panic: %v", v))
+					span.SetStatus(codes.Error, "panic")
+					sc := span.SpanContext()
 					logger.Error("panic recovered",
-						"panic", v,
-						"path", r.URL.Path,
-						"stack", string(debug.Stack()),
-					)
+						"panic", v, "path", r.URL.Path, "stack", string(debug.Stack()),
+						"trace_id", traceIDOrEmpty(sc), "span_id", spanIDOrEmpty(sc))
 					w.WriteHeader(http.StatusInternalServerError)
 				}
 			}()
@@ -135,4 +151,23 @@ type statusWriter struct {
 func (s *statusWriter) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer so the
+// reverse-proxy's FlushInterval:-1 streaming and websocket Hijack pass through
+// the default access log fallback.
+func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
+func traceIDOrEmpty(sc trace.SpanContext) string {
+	if sc.HasTraceID() {
+		return sc.TraceID().String()
+	}
+	return ""
+}
+
+func spanIDOrEmpty(sc trace.SpanContext) string {
+	if sc.HasSpanID() {
+		return sc.SpanID().String()
+	}
+	return ""
 }

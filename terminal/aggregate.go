@@ -15,6 +15,7 @@ import (
 
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/telemetry"
 )
 
 // maxBackendBytes caps a single backend response read (memory bound).
@@ -176,8 +177,9 @@ func (h *apiHandler) call(ctx context.Context, in *http.Request, b backend) back
 	if err != nil {
 		return backendResult{}
 	}
+	out = out.WithContext(telemetry.WithBackend(out.Context(), b.group))
 	prepareBackendRequest(out, in, b.opts)
-	resp, err := sharedTransport.RoundTrip(out)
+	resp, err := backendRoundTripper.RoundTrip(out)
 	if err != nil {
 		return backendResult{timeout: errors.Is(err, context.DeadlineExceeded)}
 	}

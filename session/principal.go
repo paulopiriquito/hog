@@ -10,6 +10,11 @@ type Principal struct {
 	Passport    map[string]any
 	Groups      []string
 	AccessToken string
+
+	// SessionID is a non-reversible session correlation handle, safe to log.
+	// It is set in stateful mode (from Session.CorrelationID) and empty in
+	// stateless mode. It is NEVER the raw session cookie value.
+	SessionID string
 }
 
 // Principal derives the request-context view from a full session.
@@ -19,6 +24,7 @@ func (s *Session) Principal() *Principal {
 		Passport:    s.Passport,
 		Groups:      s.Groups,
 		AccessToken: s.AccessToken,
+		SessionID:   s.CorrelationID,
 	}
 }
 

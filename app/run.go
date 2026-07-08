@@ -3,22 +3,20 @@ package app
 import (
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/telemetry"
 )
 
-// Run loads config from path, builds the handler using reg, and serves until
-// ctx is cancelled, then shuts down gracefully. It also starts a minimal
-// metrics listener on the Gateway's OTEL port if configured.
+// Run loads config from path, sets up telemetry, builds the handler using reg,
+// and serves until ctx is cancelled, then shuts down gracefully (flushing spans
+// and metrics).
 func Run(ctx context.Context, path string, reg *registry.Registry, logger *slog.Logger) error {
-	if logger == nil {
-		logger = slog.Default()
-	}
 	resources, err := config.Load(path)
 	if err != nil {
 		return err
@@ -27,32 +25,35 @@ func Run(ctx context.Context, path string, reg *registry.Registry, logger *slog.
 	if err != nil {
 		return err
 	}
+	if logger == nil {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.Telemetry.SlogLevel()}))
+	}
+
+	shutdownTel, err := telemetry.Setup(ctx, cfg.Telemetry, logger)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTel(sctx)
+	}()
+
 	a, err := Build(cfg, reg, logger)
 	if err != nil {
 		return err
 	}
-
 	srv := &http.Server{Addr: cfg.Gateway.Listen, Handler: a.Handler}
-	var otel *http.Server
-	if cfg.Gateway.OTELPort != "" {
-		otel = &http.Server{Addr: cfg.Gateway.OTELPort, Handler: metricsStub()}
-	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1)
 	go func() { errCh <- serve(srv) }()
-	if otel != nil {
-		go func() { errCh <- serve(otel) }()
-	}
-	logger.Info("hog listening", "addr", cfg.Gateway.Listen, "otel", cfg.Gateway.OTELPort)
+	logger.Info("hog listening", "addr", cfg.Gateway.Listen)
 
 	select {
 	case <-ctx.Done():
 		shutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutCtx)
-		if otel != nil {
-			_ = otel.Shutdown(shutCtx)
-		}
 		return nil
 	case err := <-errCh:
 		return err
@@ -64,12 +65,4 @@ func serve(s *http.Server) error {
 		return err
 	}
 	return nil
-}
-
-// metricsStub is a placeholder OTEL-port handler; the observability spec
-// replaces it with a real metrics exporter.
-func metricsStub() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, "# hog metrics endpoint (stub)\n")
-	})
 }

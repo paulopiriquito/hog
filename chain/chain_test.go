@@ -76,7 +76,7 @@ func TestSkeletonNamesAndOrder(t *testing.T) {
 
 func TestRecoverTurnsPanicInto500(t *testing.T) {
 	boom := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })
-	h := Compose(boom, Skeleton(nil, Gates{})...)
+	h := Compose(boom, Skeleton(nil, Gates{}, Observability{})...)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -89,7 +89,7 @@ func TestRequestIDHeaderSet(t *testing.T) {
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = w.Header().Get("X-Request-Id")
 	})
-	h := Compose(terminal, Skeleton(nil, Gates{})...)
+	h := Compose(terminal, Skeleton(nil, Gates{}, Observability{})...)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	if seen == "" {
 		t.Fatal("X-Request-Id not set by skeleton")
@@ -121,7 +121,7 @@ func TestSkeletonInjectsGates(t *testing.T) {
 	}
 	gates := Gates{Session: mk("session"), AuthGate: mk("auth"), Projection: mk("proj")}
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
-	Compose(terminal, Skeleton(nil, gates)...).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	Compose(terminal, Skeleton(nil, gates, Observability{})...).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 
 	// The injected gates run in their fixed skeleton positions, before the terminal;
 	// the un-instrumented reserved slots (recover/request-id/access-log/security/authz)
@@ -152,7 +152,7 @@ func TestSkeletonNilGatesAllReserved(t *testing.T) {
 	// Skeleton(nil, Gates{}) must behave exactly like the old all-reserved skeleton.
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
 	rec := httptest.NewRecorder()
-	Compose(terminal, Skeleton(nil, Gates{})...).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	Compose(terminal, Skeleton(nil, Gates{}, Observability{})...).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != 204 {
 		t.Fatalf("status = %d", rec.Code)
 	}
@@ -167,7 +167,7 @@ func TestSkeletonPartialGatesLeavesOthersReserved(t *testing.T) {
 		})
 	})
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
-	Compose(terminal, Skeleton(nil, Gates{Session: sessionMW})...).
+	Compose(terminal, Skeleton(nil, Gates{Session: sessionMW}, Observability{})...).
 		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	if strings.Join(ran, ",") != "session,terminal" {
 		t.Fatalf("partial gates ran = %v, want [session terminal]", ran)

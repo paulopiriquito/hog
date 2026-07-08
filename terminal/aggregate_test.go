@@ -2,15 +2,23 @@ package terminal
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/session"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestAPIMergesUnderGroups(t *testing.T) {
@@ -224,5 +232,124 @@ func TestAPIForwardAccessTokenPerBackend(t *testing.T) {
 	}
 	if withoutAuth != "" {
 		t.Fatalf("non-opted backend leaked Authorization = %q, want empty", withoutAuth)
+	}
+}
+
+func TestAPIBackendCallEmitsClientSpanAndPropagates(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prevTP := otel.GetTracerProvider()
+	prevProp := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+	})
+
+	var gotTraceparent string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTraceparent = r.Header.Get("traceparent")
+		io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(be.Close)
+
+	h := buildHandler(t, "api", "type: api\nbackends:\n  - { group: org, upstream: "+be.URL+", path: /org }\n")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest("GET", "http://hog.example/x", nil))
+	if rec2.Code != 200 {
+		t.Fatalf("status = %d", rec2.Code)
+	}
+
+	if gotTraceparent == "" {
+		t.Fatal("backend did not receive a traceparent")
+	}
+	var found bool
+	for _, span := range rec.Ended() {
+		for _, a := range span.Attributes() {
+			if string(a.Key) == "hog.backend" && a.Value.AsString() == "org" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no client span with hog.backend=org recorded; spans: %v", rec.Ended())
+	}
+}
+
+// TestAPIConcurrentBackendsDoNotBleedSpanAttributes fans out to several
+// backends concurrently (api aggregation calls every backend in its own
+// goroutine, sharing one InstrumentedTransport) and verifies each backend's
+// client span carries ITS OWN hog.backend group — i.e. the per-request
+// context/span used to tag hog.backend never bleeds across goroutines onto a
+// different backend's span. The span's own server.address/server.port
+// (independent of hog.backend) is used to know which backend a span actually
+// hit, so this is a real cross-check and not circular. Run with -race.
+func TestAPIConcurrentBackendsDoNotBleedSpanAttributes(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prevTP := otel.GetTracerProvider()
+	prevProp := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+	})
+
+	groups := []string{"a", "b", "c", "d", "e", "f"}
+	servers := make(map[string]*httptest.Server, len(groups))
+	hostToGroup := make(map[string]string, len(groups))
+	for _, g := range groups {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			io.WriteString(w, `{}`)
+		}))
+		t.Cleanup(srv.Close)
+		servers[g] = srv
+		hostToGroup[srv.Listener.Addr().String()] = g
+	}
+
+	var cfg strings.Builder
+	cfg.WriteString("type: api\nbackends:\n")
+	for _, g := range groups {
+		fmt.Fprintf(&cfg, "  - { group: %s, upstream: %s, path: /%s }\n", g, servers[g].URL, g)
+	}
+
+	h := buildHandler(t, "api", cfg.String())
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest("GET", "http://hog.example/x", nil))
+	if rec2.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec2.Code, rec2.Body.String())
+	}
+
+	seenGroups := make(map[string]bool, len(groups))
+	for _, span := range rec.Ended() {
+		var host string
+		var port int64
+		var backend string
+		var hasBackend bool
+		for _, a := range span.Attributes() {
+			switch string(a.Key) {
+			case "server.address":
+				host = a.Value.AsString()
+			case "server.port":
+				port = a.Value.AsInt64()
+			case "hog.backend":
+				backend = a.Value.AsString()
+				hasBackend = true
+			}
+		}
+		if !hasBackend {
+			continue // not a backend client span (e.g. an internal/server span)
+		}
+		wantGroup, known := hostToGroup[host+":"+strconv.FormatInt(port, 10)]
+		if !known {
+			t.Fatalf("span hit unknown host %s:%d with hog.backend=%q", host, port, backend)
+		}
+		if backend != wantGroup {
+			t.Fatalf("span to %s:%d has hog.backend=%q, want %q (cross-goroutine bleed)", host, port, backend, wantGroup)
+		}
+		seenGroups[backend] = true
+	}
+	if len(seenGroups) != len(groups) {
+		t.Fatalf("saw spans for groups %v, want all of %v", seenGroups, groups)
 	}
 }

@@ -13,7 +13,6 @@ import (
 // tool, not at runtime.
 type Settings struct {
 	Listen         string    `yaml:"listen"`
-	OTELPort       string    `yaml:"otelPort"`
 	TrustedProxies []string  `yaml:"trustedProxies"`
 	Plugins        []string  `yaml:"plugins"`
 	Session        yaml.Node `yaml:"session"`       // raw; parsed by the session package

@@ -13,6 +13,12 @@ type Session struct {
 	Expiry      time.Time      `json:"exp"`
 	IssuedAt    time.Time      `json:"iat"`
 	Fingerprint string         `json:"fp"`
+
+	// CorrelationID is a non-persisted, non-reversible handle for a stateful
+	// session, set on Read in stateful mode and safe to log. It is NEVER the
+	// raw session id (a bearer credential), and json:"-" so it is never sealed
+	// or stored.
+	CorrelationID string `json:"-"`
 }
 
 // Expired reports whether the session is past its expiry.

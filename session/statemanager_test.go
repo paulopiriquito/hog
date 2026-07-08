@@ -357,6 +357,39 @@ func TestStateManagerRefreshNilTokenWhileValid(t *testing.T) {
 	}
 }
 
+// TestStateManagerCorrelationID verifies the stateful Read path surfaces a
+// session correlation id on the Principal that is (a) non-empty, (b) stable
+// across repeated reads of the same session, and (c) NEVER the raw cookie
+// value — the raw stateful session id is a bearer credential and must never
+// be exposed to logs.
+func TestStateManagerCorrelationID(t *testing.T) {
+	store := newMemStore()
+	m := stateMgr(t, store, nil)
+	cookies := issueState(t, m)
+	rawSessionID := cookies[0].Value
+
+	got1, err := readWithCookie(t, m, cookies[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	p1 := got1.Principal()
+	if p1.SessionID == "" {
+		t.Fatal("Principal.SessionID must be non-empty in stateful mode")
+	}
+	if p1.SessionID == rawSessionID {
+		t.Fatal("Principal.SessionID must NEVER equal the raw session cookie value")
+	}
+
+	got2, err := readWithCookie(t, m, cookies[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2 := got2.Principal()
+	if p2.SessionID != p1.SessionID {
+		t.Fatalf("Principal.SessionID not stable across reads: %q != %q", p1.SessionID, p2.SessionID)
+	}
+}
+
 func TestStateManagerRefreshNonRotatingKeepsOldRT(t *testing.T) {
 	store := newMemStore()
 	// IdP returns NO new refresh token (non-rotating, RFC 6749 §6)

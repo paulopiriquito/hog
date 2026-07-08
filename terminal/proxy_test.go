@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,11 @@ import (
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/session"
 	"gopkg.in/yaml.v3"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // cfgNode turns a YAML handler config string into a registry.RawConfig.
@@ -206,5 +212,62 @@ func TestProxyStripsClientAuthorizationWhenNotForwarding(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if got := be.last.Header.Get("Authorization"); got != "" {
 		t.Fatalf("backend must not receive client Authorization when forwardAccessToken=false, got %q", got)
+	}
+}
+
+// TestProxyEmitsClientSpanWithBackendHost verifies the reverse-proxy backend
+// call propagates a W3C traceparent and emits a client span tagged with
+// hog.backend=<upstream host>, and that the span's url.full has its query
+// string redacted (see telemetry.InstrumentedTransport).
+func TestProxyEmitsClientSpanWithBackendHost(t *testing.T) {
+	rec := tracetest.NewSpanRecorder()
+	prevTP := otel.GetTracerProvider()
+	prevProp := otel.GetTextMapPropagator()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+	})
+
+	var gotTP string
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTP = r.Header.Get("traceparent")
+		w.WriteHeader(200)
+	}))
+	t.Cleanup(be.Close)
+
+	h := buildHandler(t, "reverse-proxy", "type: reverse-proxy\nupstream: "+be.URL+"\n")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, httptest.NewRequest("GET", "http://hog.example/x?api_key=SECRET-1", nil))
+
+	if gotTP == "" {
+		t.Fatal("backend did not receive traceparent")
+	}
+	spans := rec.Ended()
+	if len(spans) == 0 {
+		t.Fatal("no client span")
+	}
+	host := be.Listener.Addr().String()
+	found := false
+	for _, s := range spans {
+		var hasBackend bool
+		for _, a := range s.Attributes() {
+			if string(a.Key) == "hog.backend" && a.Value.AsString() == host {
+				hasBackend = true
+			}
+		}
+		if !hasBackend {
+			continue
+		}
+		found = true
+		for _, a := range s.Attributes() {
+			if string(a.Key) == "url.full" && strings.Contains(a.Value.AsString(), "SECRET-1") {
+				t.Fatalf("url.full leaked the query: %q", a.Value.AsString())
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no client span with hog.backend=%q; spans=%v", host, spans)
 	}
 }

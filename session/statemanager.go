@@ -149,7 +149,15 @@ func (m *stateManager) Read(r *http.Request) (*Session, error) {
 	if rec == nil {
 		return nil, ErrInvalidSession
 	}
+	rec.Session.CorrelationID = correlationID(c.Value)
 	return &rec.Session, nil
+}
+
+// correlationID is a short, non-reversible handle for a stateful session id, safe
+// to log. The raw session id is a bearer credential and is NEVER logged.
+func correlationID(sessionID string) string {
+	sum := sha256.Sum256([]byte("hog/sesscorr/v1:" + sessionID))
+	return base64.RawURLEncoding.EncodeToString(sum[:])[:12]
 }
 
 // maybeRefresh silently refreshes the access token when it is within refreshSkew

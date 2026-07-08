@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/telemetry"
 )
 
 // sharedTransport is the verifying, connection-pooled transport reused by every
@@ -25,6 +26,9 @@ var sharedTransport = &http.Transport{
 	ResponseHeaderTimeout: 30 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 }
+
+// backendRoundTripper carries every backend call through OTel client instrumentation.
+var backendRoundTripper = telemetry.InstrumentedTransport(sharedTransport)
 
 // insecureTransport clones the shared transport with TLS verification disabled.
 func insecureTransport() *http.Transport {

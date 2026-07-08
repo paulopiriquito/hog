@@ -18,6 +18,8 @@ import (
 	"github.com/paulopiriquito/hog/route"
 	"github.com/paulopiriquito/hog/selector"
 	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/telemetry"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -55,6 +57,7 @@ type Config struct {
 	RequestPlugins  []PluginInstance
 	ResponsePlugins []PluginInstance
 	IdPResources    []config.Resource
+	Telemetry       telemetry.Config
 }
 
 // Parse converts loaded resources into a typed Config. Document order (the
@@ -62,6 +65,7 @@ type Config struct {
 func Parse(resources []config.Resource) (Config, error) {
 	var cfg Config
 	var gatewaySeen bool
+	var telemetrySeen bool
 	for i, r := range resources {
 		switch r.Kind {
 		case config.KindGateway:
@@ -98,12 +102,25 @@ func Parse(resources []config.Resource) (Config, error) {
 			}
 		case config.KindIdP:
 			cfg.IdPResources = append(cfg.IdPResources, r)
+		case config.KindTelemetry:
+			if telemetrySeen {
+				return Config{}, fmt.Errorf("config must contain at most one Telemetry resource (duplicate %q)", r.Metadata.Name)
+			}
+			tc, err := telemetry.FromResource(r)
+			if err != nil {
+				return Config{}, err
+			}
+			cfg.Telemetry = tc
+			telemetrySeen = true
 		default:
 			return Config{}, fmt.Errorf("unknown resource kind %q (%s)", r.Kind, r.Metadata.Name)
 		}
 	}
 	if !gatewaySeen {
 		return Config{}, fmt.Errorf("config must contain exactly one Gateway resource")
+	}
+	if !telemetrySeen {
+		cfg.Telemetry = telemetry.Default()
 	}
 	return cfg, nil
 }
@@ -129,6 +146,8 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if logger == nil {
 		logger = slog.Default()
 	}
+	logger = logger.With("service", cfg.Telemetry.Service.Name)
+	accessLog := telemetry.AccessLog(cfg.Telemetry.AccessLog, logger)
 	active, err := buildIdP(cfg.IdPResources, reg)
 	if err != nil {
 		return nil, err
@@ -206,7 +225,8 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 			logger.Warn("route requires auth but neither a session nor an IdP is configured; it will be served WITHOUT enforcement",
 				"route", rt.Name, "match", rt.Match)
 		}
-		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates)...)
+		obs := chain.Observability{AccessLog: accessLog}
+		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates, obs)...)
 		mws = append(mws, reqMW...)
 		mws = append(mws, respMW...)
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
@@ -222,7 +242,13 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		mux.HandleFunc(callbackPath(cfg.IdPResources), h.Callback)
 		mux.Handle(sessCfg.InfoPath, session.InfoHandler(sess))
 	}
-	return &App{Handler: mux, IdP: active, Session: sess}, nil
+	// Wrap the whole mux in the OTel server handler. We deliberately use the
+	// default (child) association, NOT WithPublicEndpoint: HOG runs behind a
+	// trusted TLS-terminating LB and is designed to CONTINUE an inbound
+	// traceparent (Datadog-interoperable distributed tracing), not start a new
+	// linked trace.
+	var handler http.Handler = otelhttp.NewHandler(mux, "hog")
+	return &App{Handler: handler, IdP: active, Session: sess}, nil
 }
 
 // callbackPath derives the OAuth callback path from the single IdP resource's

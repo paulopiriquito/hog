@@ -12,7 +12,6 @@ kind: Gateway
 metadata: { name: hog }
 spec:
   listen: ":8080"
-  otelPort: ":9090"
   trustedProxies: [ "10.0.0.0/8" ]
   plugins: [ "github.com/acme/hogx/geogate" ]
 `))
@@ -23,8 +22,8 @@ spec:
 	if err != nil {
 		t.Fatalf("FromResource: %v", err)
 	}
-	if g.Listen != ":8080" || g.OTELPort != ":9090" {
-		t.Fatalf("addrs = %q %q", g.Listen, g.OTELPort)
+	if g.Listen != ":8080" {
+		t.Fatalf("addr = %q", g.Listen)
 	}
 	if len(g.TrustedProxies) != 1 || g.TrustedProxies[0] != "10.0.0.0/8" {
 		t.Fatalf("trustedProxies = %v", g.TrustedProxies)
