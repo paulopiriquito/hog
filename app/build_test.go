@@ -45,7 +45,7 @@ spec: { match: /health, handler: { type: health } }
 ---
 kind: RouteGroup
 metadata: { name: g }
-spec: { selector: { matchLabels: { tier: system } }, policy: { auth: required } }
+spec: { selector: { matchLabels: { tier: system } }, access: { auth: required } }
 ---
 kind: RequestPlugin
 metadata: { name: rp1 }
@@ -385,6 +385,58 @@ spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: 
 	}
 }
 
+// Logout is POST-only (state-changing) and same-origin (via the gateway-wide
+// security stage): a GET is 405, a cross-origin POST is 403, a same-origin/
+// non-browser POST proceeds. This closes cross-site forced-logout.
+func TestBuildLogoutRequiresPostSameOrigin(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	iss := fakeIssuer(t)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session:
+    key: "0123456789abcdef0123456789abcdef"
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app.example/auth/callback }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// GET is rejected by the mux (method-restricted route) with 405.
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/logout", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET /auth/logout = %d, want 405", rec.Code)
+	}
+
+	// A cross-origin POST is rejected by the security stage's CSRF check.
+	recX := httptest.NewRecorder()
+	reqX := httptest.NewRequest("POST", "/auth/logout", nil)
+	reqX.Header.Set("Sec-Fetch-Site", "cross-site")
+	a.Handler.ServeHTTP(recX, reqX)
+	if recX.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST /auth/logout = %d, want 403", recX.Code)
+	}
+
+	// A same-origin / non-browser POST (no Sec-Fetch-Site) proceeds to the handler,
+	// which clears the session and redirects to the post-logout page.
+	recOK := httptest.NewRecorder()
+	a.Handler.ServeHTTP(recOK, httptest.NewRequest("POST", "/auth/logout", nil))
+	if recOK.Code != http.StatusFound {
+		t.Fatalf("same-origin POST /auth/logout = %d, want 302", recOK.Code)
+	}
+}
+
 func TestBuildNoAuthEndpointsWithoutSession(t *testing.T) {
 	reg := registry.New()
 	terminal.Register(reg)
@@ -457,7 +509,7 @@ spec:
   match: /app/
   type: app
   handler: { type: echo-user }
-  policy: { auth: required }
+  access: { auth: required }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -521,7 +573,7 @@ spec:
   match: /app/
   type: app
   handler: { type: echo-user }
-  policy: { auth: required }
+  access: { auth: required }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -815,7 +867,7 @@ spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: 
 ---
 kind: Route
 metadata: { name: spa, labels: { x: y } }
-spec: { match: /app/, type: app, handler: { type: echo-bearer }, policy: { auth: required } }
+spec: { match: /app/, type: app, handler: { type: echo-bearer }, access: { auth: required } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -880,7 +932,7 @@ spec:
 ---
 kind: Route
 metadata: { name: spa, labels: { x: y } }
-spec: { match: /app/, type: app, handler: { type: echo-user }, policy: { auth: required } }
+spec: { match: /app/, type: app, handler: { type: echo-user }, access: { auth: required } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -981,7 +1033,7 @@ spec:
   match: /svc/
   type: service
   handler: { type: reverse-proxy, upstream: `+backend.URL+`, stripPrefix: /svc }
-  policy: { auth: public }
+  access: { auth: public }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1019,7 +1071,7 @@ spec:
     type: api
     backends:
       - { group: org, upstream: `+backend.URL+`, path: /org }
-  policy: { auth: public }
+  access: { auth: public }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1051,7 +1103,7 @@ spec: {}
 ---
 kind: Route
 metadata: { name: hc }
-spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+spec: { match: /health, handler: { type: health }, access: { auth: public } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1095,7 +1147,7 @@ spec: {}
 ---
 kind: Route
 metadata: { name: b }
-spec: { match: /boom, handler: { type: boom }, policy: { auth: public } }
+spec: { match: /boom, handler: { type: boom }, access: { auth: public } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1144,7 +1196,7 @@ spec:
 ---
 kind: Route
 metadata: { name: hc }
-spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+spec: { match: /health, handler: { type: health }, access: { auth: public } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1215,7 +1267,7 @@ spec: {}
 ---
 kind: Route
 metadata: { name: s }
-spec: { match: /s, handler: { type: flushprobe }, policy: { auth: public } }
+spec: { match: /s, handler: { type: flushprobe }, access: { auth: public } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1255,7 +1307,7 @@ spec:
 ---
 kind: Route
 metadata: { name: hc }
-spec: { match: /health, handler: { type: health }, policy: { auth: public } }
+spec: { match: /health, handler: { type: health }, access: { auth: public } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1346,7 +1398,7 @@ spec:
   match: /svc/
   type: service
   handler: { type: reverse-proxy, upstream: `+backend.URL+`, stripPrefix: /svc }
-  policy: { auth: public }
+  access: { auth: public }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1429,7 +1481,7 @@ spec: { require: { groups: [admins] } }
 ---
 kind: Route
 metadata: { name: a }
-spec: { match: /admin/, type: service, handler: { type: echo-user }, policies: [admins] }
+spec: { match: /admin/, type: service, handler: { type: echo-user }, access: { authorize: [admins] } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1465,7 +1517,7 @@ spec: { require: { groups: [nobody] } }
 ---
 kind: Route
 metadata: { name: a }
-spec: { match: /admin/, type: service, handler: { type: echo-user }, policies: [nobody] }
+spec: { match: /admin/, type: service, handler: { type: echo-user }, access: { authorize: [nobody] } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1496,7 +1548,7 @@ spec: {}
 ---
 kind: Route
 metadata: { name: a }
-spec: { match: /x/, type: app, handler: { type: echo-user }, policies: [nope] }
+spec: { match: /x/, type: app, handler: { type: echo-user }, access: { authorize: [nope] } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1524,7 +1576,7 @@ spec: { rego: { path: `+dir+` } }
 ---
 kind: Route
 metadata: { name: a }
-spec: { match: /x/, type: app, handler: { type: echo-user }, policies: [bad] }
+spec: { match: /x/, type: app, handler: { type: echo-user }, access: { authorize: [bad] } }
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -1580,7 +1632,7 @@ kind: RouteGroup
 metadata: { name: locked }
 spec:
   selector: { matchLabels: { tier: locked } }
-  policies: [restricted]
+  access: { authorize: [restricted] }
 ---
 kind: Route
 metadata: { name: a, labels: { tier: locked } }
@@ -1626,7 +1678,7 @@ kind: RouteGroup
 metadata: { name: locked }
 spec:
   selector: { matchLabels: { tier: locked } }
-  policies: [restricted]
+  access: { authorize: [restricted] }
 ---
 kind: Route
 metadata: { name: a, labels: { tier: locked } }
@@ -1661,6 +1713,201 @@ spec: { match: /open/, type: app, handler: { type: echo-user } }
 	}
 }
 
+func TestBuildForwardedStripsUntrustedProto(t *testing.T) {
+	reg := registry.New()
+	reg.Register(config.KindTerminalHandler, "echo-proto", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-Forwarded-Proto"))
+		}), nil
+	})
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-proto }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/p", nil)
+	req.RemoteAddr = "203.0.113.9:5555"
+	req.Header.Set("X-Forwarded-Proto", "http")
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Body.String() != "" {
+		t.Fatalf("untrusted X-Forwarded-Proto reached the handler: %q", rec.Body.String())
+	}
+}
+
+// TestBuildForwardedStripsUntrustedRealIP confirms the outermost forwarded
+// wrap (applied before otelhttp, ahead of routing) strips a spoofed
+// X-Real-IP from an untrusted peer end-to-end through a.Handler.
+func TestBuildForwardedStripsUntrustedRealIP(t *testing.T) {
+	reg := registry.New()
+	reg.Register(config.KindTerminalHandler, "echo-real-ip", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-Real-IP"))
+		}), nil
+	})
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-real-ip }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/p", nil)
+	req.RemoteAddr = "203.0.113.9:5555"
+	req.Header.Set("X-Real-IP", "9.9.9.9")
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Body.String() != "" {
+		t.Fatalf("untrusted X-Real-IP reached the handler: %q", rec.Body.String())
+	}
+}
+
+func TestBuildForwardedTrustsWildcard(t *testing.T) {
+	reg := registry.New()
+	reg.Register(config.KindTerminalHandler, "echo-proto2", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-Forwarded-Proto"))
+		}), nil
+	})
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: { trustedProxies: ["*"] }
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-proto2 }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/p", nil)
+	req.Header.Set("X-Forwarded-Proto", "http")
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Body.String() != "http" {
+		t.Fatalf("trusted X-Forwarded-Proto should be preserved, got %q", rec.Body.String())
+	}
+}
+
+// TestBuildFailsFastOnBadTrustedProxies proves an invalid trustedProxies
+// entry (not an IP, CIDR, or "*") fails Build rather than silently degrading
+// the forwarded stage at request time.
+func TestBuildFailsFastOnBadTrustedProxies(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: { trustedProxies: ["bogus"] }
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-user }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("Build must fail fast on an invalid trustedProxies entry")
+	}
+}
+
+// TestBuildSecurityDefaults proves the security stage is wired end-to-end
+// through Build: the configurable security headers are set on every response,
+// and a cross-origin unsafe request is rejected by CSRF protection.
+func TestBuildSecurityDefaults(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-user }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/p", nil))
+	if rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("missing nosniff header: %v", rec.Header())
+	}
+	rec2 := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/p", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	a.Handler.ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusForbidden {
+		t.Fatalf("cross-site POST = %d, want 403", rec2.Code)
+	}
+}
+
+// TestBuildSecurityHeadersGatewayWide proves security is wired as the
+// gateway-wide outermost wrap (forwarded(security(otel(mux)))), not a
+// per-route skeleton slot: a request to a path with NO matching route still
+// carries the security headers, since it never reaches a route's skeleton.
+// This is what makes the raw auth endpoints (login/logout/callback/info,
+// mounted directly on the mux) covered too.
+func TestBuildSecurityHeadersGatewayWide(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: p }
+spec: { match: /p, type: app, handler: { type: echo-user }, access: { auth: public } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/does-not-exist", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("missing nosniff header on unmatched path: %v", rec.Header())
+	}
+}
+
 func TestBuildAuthzEndToEnd(t *testing.T) {
 	reg := registry.New()
 	registerEcho(reg)
@@ -1682,7 +1929,7 @@ spec: { rego: { path: `+dir+` } }
 ---
 kind: Route
 metadata: { name: pub }
-spec: { match: /pub/, type: app, handler: { type: echo-user }, policies: [no-delete] }
+spec: { match: /pub/, type: app, handler: { type: echo-user }, access: { authorize: [no-delete] } }
 ---
 kind: Route
 metadata: { name: open }

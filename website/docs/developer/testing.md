@@ -105,7 +105,7 @@ spec:
 ---
 kind: Route
 metadata: { name: hello }
-spec: { match: /hello, handler: { type: greeter }, policy: { auth: public } }
+spec: { match: /hello, handler: { type: greeter }, access: { auth: public } }
 `), 0o600)
 
 	bin := filepath.Join(work, "hog")

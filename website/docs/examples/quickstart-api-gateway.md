@@ -98,8 +98,9 @@ spec:
     type: reverse-proxy
     upstream: http://backend:9000
     stripPrefix: /api
-  policy: { auth: required }
-  policies: [staff]
+  access:
+    auth: required
+    authorize: [staff]
 ---
 kind: Route
 metadata: { name: admin-api, labels: { tier: api } }
@@ -109,28 +110,30 @@ spec:
     type: reverse-proxy
     upstream: http://backend:9000
     stripPrefix: /api
-  policy: { auth: required }
-  policies: [admins]
+  access:
+    auth: required
+    authorize: [admins]
 ---
 kind: RouteGroup
 metadata: { name: api-writes }
 spec:
   selector: { matchLabels: { tier: api } }
-  policies: [writes]
+  access:
+    authorize: [writes]
 ```
 
 - **`admins`** and **`staff`** are attached directly to a route's own
-  `policies:` — `users-api` accepts anyone in `staff` *or* `admins`
+  `access.authorize:` — `users-api` accepts anyone in `staff` *or* `admins`
   (broader, read-heavy endpoint); `admin-api` accepts only `admins`
   (narrower).
 - **`writes`** is attached to every route the `api-writes` `RouteGroup`
   selects — here, any route labeled `tier: api` — so it's configured once
   and inherited by both routes without repeating it per-route.
 - The effective policy set for a request is the union of the route's own
-  `policies` and every matching `RouteGroup`'s, deduplicated; **all** of
-  them must pass. A `staff` member passes `users-api`'s own `staff` policy
-  but is still denied a `POST` there by `writes` — group membership on the
-  route doesn't override the narrower Rego rule.
+  `access.authorize` and every matching `RouteGroup`'s, deduplicated; **all**
+  of them must pass. A `staff` member passes `users-api`'s own `staff`
+  policy but is still denied a `POST` there by `writes` — group membership
+  on the route doesn't override the narrower Rego rule.
 
 ## 3. Write the Dockerfile
 
@@ -238,9 +241,9 @@ identity:
 - **`require`** semantics: `groups` is *any-of* (the principal needs at
   least one listed group); `claims` is *all-of* across different claim
   keys, each with its own any-of value list.
-- **Additive, default-allow**: a route with no `policies:` and no matching
-  `RouteGroup` has no authorization gate at all — only the auth (`required`
-  vs `public`) check applies.
+- **Additive, default-allow**: a route with no `access.authorize:` and no
+  matching `RouteGroup` has no authorization gate at all — only the auth
+  (`required` vs `public`) check applies.
 - **Deny-overrides, fail-closed**: every policy in the effective set must
   pass; the first deny wins, and a Rego evaluation error is itself treated
   as a deny (never a silent allow).

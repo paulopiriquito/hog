@@ -22,7 +22,7 @@ spec:
   handler:
     type: static
     dir: /srv/web
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 A config path is a single file or a directory of `*.yaml`/`*.yml` files,
@@ -50,24 +50,25 @@ metadata: { name: dashboard, labels: { tier: api } }
 spec:
   match: /api/dashboard
   handler: { type: api, backends: [...] }
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
-A **RouteGroup** applies shared policy — authentication requirement, route
-type, projection settings — to every route whose labels match its selector,
-the same way a Kubernetes Service selects Pods:
+A **RouteGroup** applies a shared `access` block — authentication
+requirement, authorization policies, route type, projection settings — to
+every route whose labels match its selector, the same way a Kubernetes
+Service selects Pods:
 
 ```yaml
 kind: RouteGroup
 metadata: { name: app-auth }
 spec:
   selector: { matchLabels: { tier: api } }
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
 A RouteGroup is a selector-based policy object, not a parent container — a
 route doesn't belong to a group, it merely matches one or more of them.
-Matching groups apply in document order, and a route's own `spec.policy`
+Matching groups apply in document order, and a route's own `spec.access`
 always wins. An unset `auth` defaults from the route's type: `service`
 routes (`reverse-proxy`, `api`) require authentication; `app` routes
 (`static`, and anything else) are public.
@@ -87,30 +88,43 @@ A **terminal** is the handler at the end of a route — named by
 
 ## The middleware chain
 
-Every request passes through a fixed, ordered chain of middleware before it
-reaches its terminal. Outer to inner:
+Two gateway-wide edge layers wrap the *entire* handler — every route and the
+raw `/auth/*` endpoints alike — outermost first:
+
+1. **Forwarded** — strips inbound `X-Forwarded-*`/`X-Real-Ip`/`Forwarded`
+   headers unless the immediate peer is a configured `trustedProxies` entry,
+   so a spoofed header from an untrusted caller never reaches routing,
+   tracing, or a backend.
+2. **Security** — CSRF protection (`net/http.CrossOriginProtection`) and
+   security response headers (`X-Frame-Options`, `Strict-Transport-Security`,
+   etc.), on by default.
+
+Once a request reaches the `ServeMux` and matches a `Route`, it passes
+through a fixed, ordered per-route chain of middleware before it reaches its
+terminal. Outer to inner:
 
 1. **Recover** — catches panics, logs them with trace correlation, and
    returns `500` instead of crashing the process.
 2. **Request-ID** — assigns or propagates `X-Request-Id`.
 3. **Access log** — emits one structured, trace-correlated log line per
    request on the way out.
-4. **Security** — a reserved stage for security headers and cross-site request
-   forgery (CSRF) protection. It is a pass-through today; enforcement is planned.
-5. **Session** — resolves the caller's identity from the session cookie or a
+4. **Session** — resolves the caller's identity from the session cookie or a
    bearer token.
-6. **Auth gate** — blocks unauthenticated access to routes that require it
+5. **Auth gate** — blocks unauthenticated access to routes that require it
    (browser routes redirect to login; API routes get `401`).
-7. **Authz** — evaluates the route's [Policy](#resources) resources; a deny
-   returns `403`.
-8. **Projection** — strips inbound `X-User-*` headers and injects the
+6. **Authz** — evaluates the route's `access.authorize` [Policy](#resources)
+   resources; a deny returns `403`.
+7. **Projection** — strips inbound `X-User-*` headers and injects the
    resolved identity as headers for the backend.
 
 The chain then hands off to the route's **terminal**. This skeleton is fixed:
 you can't reorder it or run code ahead of the gates. Your own code runs only
 in two guarded slots — request plugins (after the gates, before the
 terminal) and response plugins (as the response unwinds) — in the order
-their resources appear in the config.
+their resources appear in the config. See
+[architecture: request lifecycle](../architecture/request-lifecycle.md) for
+the full picture, including why the edge layers aren't part of the per-route
+skeleton.
 
 ## Plugins & the registry
 

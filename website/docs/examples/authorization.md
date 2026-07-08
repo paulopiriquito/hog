@@ -71,27 +71,31 @@ spec:
     type: reverse-proxy
     upstream: http://admin-backend:9000
     stripPrefix: /admin
-  policy: { auth: required }
-  policies: [admins-only]
+  access:
+    auth: required
+    authorize: [admins-only]
 ---
 kind: RouteGroup
 metadata: { name: admin-writes }
 spec:
   selector: { matchLabels: { tier: admin } }
-  policies: [no-destructive-writes]
+  access:
+    authorize: [no-destructive-writes]
 ```
 
 - `identity.groups` maps an `isMemberOf`-style userinfo/token claim (common
   on LDAP-backed providers) into the session's `groups`: keep only DNs
   matching `cn=admins,...`, render each as its `cn=` value (`admins`).
-- **`admins-only`** is attached directly to the route's own `policies:`.
+- **`admins-only`** is attached directly to the route's own
+  `access.authorize:`.
 - **`no-destructive-writes`** is attached to every route the `admin-writes`
   `RouteGroup` selects — here, any route labeled `tier: admin` — so it's
   configured once and inherited by every admin route without repeating it
   per-route.
 - The effective policy set for a request is the union of the route's own
-  `policies` and every matching group's, deduplicated; **all** of them must
-  pass (deny-overrides) — `admin-api` is denied if either policy denies it.
+  `access.authorize` and every matching group's, deduplicated; **all** of
+  them must pass (deny-overrides) — `admin-api` is denied if either policy
+  denies it.
 - `rego.path` points at a file (or directory) *inside the running
   container* — mount `policies/` alongside your config, e.g.
   `-v "$(pwd)/policies:/etc/hog/policies:ro"`.

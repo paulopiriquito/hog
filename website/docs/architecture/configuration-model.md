@@ -33,7 +33,7 @@ The top-level `kind` values a config document can declare are:
 |---|---|---|
 | `Gateway` | exactly one | gateway-wide settings and the plugin build manifest |
 | `Route` | many | binds a path pattern to a terminal handler |
-| `RouteGroup` | many | applies shared type/auth/projection/policy to routes by selector |
+| `RouteGroup` | many | applies shared type/auth/projection/authorize to routes by selector |
 | `Policy` | many | a named authorization rule, referenced by routes/groups |
 | `IdP` | zero or one (today) | the OpenID Connect provider |
 | `RequestPlugin` | many | a developer middleware in the pre-terminal slot |
@@ -68,14 +68,14 @@ zero or with more than one. Its `spec` holds:
 
 A `Route`'s `spec` sets `match` (the `ServeMux` pattern) and `handler`
 (`type` plus handler-specific config). It may also set `type` (`app` or
-`service`), a `policy` block (`auth`, `projection`), and a `policies` list of
-`Policy` names to enforce.
+`service`) and an `access` block: `auth`, `authorize` (a list of `Policy`
+names to enforce), and `projection`.
 
 A `RouteGroup` is **not** a parent container — it is a selector-based policy
 object, exactly like a Kubernetes Service selecting Pods. Its `spec.selector`
 (`matchLabels` and/or set-based `matchExpressions`) picks which routes it
 applies to by their `metadata.labels`; an empty selector matches every route.
-Its `type`, `policy`, and `policies` apply to every route it matches.
+Its `type` and `access` block apply to every route it matches.
 
 ```yaml
 kind: Gateway
@@ -92,13 +92,13 @@ spec:
     backends:
       - { group: profile, upstream: ${PROFILE_SVC}, path: /me }
       - { group: orders,  upstream: ${ORDERS_SVC},  path: /list }
-  policies: [dash-users]
+  access: { authorize: [dash-users] }
 ---
 kind: RouteGroup
 metadata: { name: app-auth }
 spec:
   selector: { matchLabels: { app: dash } }
-  policy: { auth: required }
+  access: { auth: required }
 ---
 kind: Policy
 metadata: { name: dash-users }
@@ -107,7 +107,7 @@ spec:
     groups: [dashboard-users]
 ```
 
-## Resolving a route's effective policy
+## Resolving a route's effective access
 
 `route.Resolve` computes what actually governs one route, combining the
 route's own fields with every `RouteGroup` whose selector matches its labels
@@ -118,14 +118,14 @@ field):
   group's `type`; otherwise it's inferred from the handler (`reverse-proxy`
   and `api` infer `service`; everything else infers `app`). The result must
   be `app` or `service`.
-- **Auth** — the route's own `policy.auth` wins if set; otherwise the last
+- **Auth** — the route's own `access.auth` wins if set; otherwise the last
   matching group's; otherwise it defaults by type (`service` → `required`,
   `app` → `public`). The result must be `required` or `public`.
-- **Projection** — the route's own `policy.projection` wins if set, otherwise
+- **Projection** — the route's own `access.projection` wins if set, otherwise
   the last matching group's.
-- **Policies** — the *union* of the route's own `policies` list and every
-  matching group's `policies` list, de-duplicated, in that order. This is the
-  set the authz stage evaluates.
+- **Authorize** — the *union* of the route's own `access.authorize` list and
+  every matching group's `access.authorize` list, de-duplicated, in that
+  order. This is the set the authz stage evaluates.
 
 An invalid `type` or `auth` value fails the build, even on a route that would
 otherwise run without a session or IdP configured.

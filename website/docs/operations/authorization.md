@@ -48,8 +48,9 @@ metadata: { name: admin-panel, labels: { tier: app } }
 spec:
   match: /admin/
   handler: { type: static, dir: /srv/admin }
-  policy: { auth: required }
-  policies: [admins-only]
+  access:
+    auth: required
+    authorize: [admins-only]
 ```
 
 Or to every route a `RouteGroup` selects:
@@ -60,13 +61,14 @@ metadata: { name: admin-routes }
 spec:
   selector:
     matchLabels: { area: admin }
-  policy: { auth: required }
-  policies: [admins-only]
+  access:
+    auth: required
+    authorize: [admins-only]
 ```
 
-A route's effective policy set is the **union** of its own `policies` and
-every matching `RouteGroup`'s `policies` (deduplicated by name). A route
-with an empty effective set skips the authorization gate entirely —
+A route's effective policy set is the **union** of its own `access.authorize`
+and every matching `RouteGroup`'s `access.authorize` (deduplicated by name).
+A route with an empty effective set skips the authorization gate entirely —
 **default-allow**: authorization is opt-in per route, not a global gate.
 
 ## Write a Rego policy
@@ -139,7 +141,8 @@ token is never included in `input`.
 
 ```yaml
 spec:
-  policies: [gold-tier, no-weekend-deletes]
+  access:
+    authorize: [gold-tier, no-weekend-deletes]
 ```
 
 See [troubleshooting](troubleshooting.md#403-forbidden-from-a-policy) for

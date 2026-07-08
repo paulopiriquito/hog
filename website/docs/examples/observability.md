@@ -45,7 +45,7 @@ metadata: { name: spa }
 spec:
   match: /
   handler: { type: static, dir: /srv/web }
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 - **`service.name`** is the only required field; it's applied to every

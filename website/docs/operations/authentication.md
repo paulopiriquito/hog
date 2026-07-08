@@ -10,7 +10,7 @@ endpoints to be mounted:
 
 1. A `kind: IdP` resource — the OIDC connector.
 2. `Gateway.spec.session` — the encrypted session cookie.
-3. Routes marked `policy: { auth: required }` (directly or via a
+3. Routes marked `access: { auth: required }` (directly or via a
    `RouteGroup`) to protect.
 
 If `session` is configured without an `IdP`, HOG logs a startup warning and
@@ -106,7 +106,7 @@ defaults.
 
 Auth defaults from a route's `type`: `service` routes (`reverse-proxy`,
 `api`) require auth by default; `app` routes (`static`) are public by
-default. Set `policy.auth` explicitly to override, either per-route or on a
+default. Set `access.auth` explicitly to override, either per-route or on a
 `RouteGroup`:
 
 ```yaml
@@ -115,7 +115,7 @@ metadata: { name: dashboard, labels: { tier: app } }
 spec:
   match: /app/
   handler: { type: static, dir: /srv/web }
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
 An unauthenticated request to a required **app** route gets a `302` redirect
@@ -132,7 +132,7 @@ from `Gateway.spec.auth` (defaults shown):
 |---|---|---|
 | Login | `/auth/login` | Starts the OIDC Authorization Code flow (with PKCE if enabled); redirects to the IdP. |
 | Callback | derived from `IdP.spec.redirectURL`, else `/auth/callback` | Exchanges the code, verifies the ID token, fetches userinfo if the identity model needs it, and issues the session cookie. |
-| Logout | `/auth/logout` | Clears the HOG session and redirects to `session.postLogoutRedirect` (default `/`). This is a HOG-only logout — it does not end the IdP's own session. |
+| Logout | `/auth/logout` | **`POST` only** (a non-`POST` returns `405`). Clears the HOG session and redirects to `session.postLogoutRedirect` (default `/`). Same-origin: because it is an unsafe method, the gateway-wide [security stage](security.md) rejects a cross-origin logout — so trigger it with a same-origin `POST` (a form or `fetch('/auth/logout', { method: 'POST' })`), not a link. This is a HOG-only logout — it does not end the IdP's own session. |
 | Session info | `session.infoPath`, default `/auth/session` | `GET` → `200` with the public session view (subject, passport, groups, expiry — never tokens) if a valid session is present, else `401`. This is what your SPA polls to know who's logged in. |
 
 ```yaml
@@ -179,7 +179,7 @@ metadata: { name: spa, labels: { tier: app } }
 spec:
   match: /
   handler: { type: static, dir: /srv/web }
-  policy: { auth: required }
+  access: { auth: required }
 ---
 kind: Route
 metadata: { name: api, labels: { tier: service } }
@@ -190,7 +190,7 @@ spec:
     type: reverse-proxy
     upstream: http://backend:9000
     stripPrefix: /api
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
 See [troubleshooting](troubleshooting.md) for common login/session failures,

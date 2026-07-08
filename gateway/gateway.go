@@ -14,6 +14,7 @@ import (
 type Settings struct {
 	Listen         string    `yaml:"listen"`
 	TrustedProxies []string  `yaml:"trustedProxies"`
+	Security       yaml.Node `yaml:"security"` // raw; parsed by the security package
 	Plugins        []string  `yaml:"plugins"`
 	Session        yaml.Node `yaml:"session"`       // raw; parsed by the session package
 	Identity       yaml.Node `yaml:"identity"`      // raw; parsed by the session package (ParseIdentity)

@@ -32,17 +32,35 @@ spec:
 Rotating the key invalidates every existing session (a deliberate
 trade-off — see [authentication](authentication.md#2-configure-the-session)).
 
-## Terminate TLS at a trusted load balancer
+## Terminate TLS at a trusted load balancer, and set `trustedProxies`
 
 HOG does not terminate TLS itself. Deploy it behind a TLS-terminating load
-balancer or ingress, and make sure only that proxy can reach HOG directly —
-`X-Forwarded-Proto` (used to decide whether cookies are marked `Secure`) and
-`X-Forwarded-For` are currently trusted from **any** caller that can reach
-HOG, since the `Gateway.spec.trustedProxies` field is parsed but not yet
-enforced against the request path. Network-level isolation (a private
-subnet, a service mesh, security groups) is what actually protects you
-today — don't rely on `trustedProxies` alone. See the
-[configuration reference](configuration.md#gateway) note on this field.
+balancer or ingress, and tell HOG which peer to trust with
+`Gateway.spec.trustedProxies`: a gateway-wide `forwarded` layer strips
+`X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`,
+`X-Forwarded-Port`, `X-Real-Ip`, and `Forwarded` from any request whose
+immediate peer isn't listed there, before routing and before OpenTelemetry
+ever see the request. `trustedProxies` takes CIDRs or bare IPs; `"*"` trusts
+every peer (only appropriate if HOG's listener is otherwise unreachable
+except through your proxy); the **default — an empty list — trusts no
+peer**, so those headers are stripped from every request until you configure
+it. This is the secure default, but it also means `X-Forwarded-Proto` (used
+to decide whether cookies are marked `Secure`), the client IP HOG logs and
+projects, and the `X-Forwarded-*` chain forwarded to backends all silently
+fall back to "no proxy" values (always-`Secure` cookies, the immediate peer
+as client IP) until you set this field:
+
+```yaml
+spec:
+  trustedProxies: ["10.0.0.0/8"]   # your LB's/ingress's CIDR
+```
+
+Network-level isolation (a private subnet, a service mesh, security groups)
+is still what stops an untrusted party from reaching HOG directly in the
+first place — `trustedProxies` decides which of the peers that *can* reach
+HOG are allowed to set forwarded headers, it doesn't substitute for network
+isolation. See the [configuration reference](configuration.md#gateway) note
+on this field.
 
 ## Leave `SameSite=Lax` alone
 
@@ -75,11 +93,11 @@ straight through to a backend.
 
 ## Authorization is fail-closed
 
-- A route with no `policies` skips the authorization gate (default-allow —
-  authorization is opt-in per route, not implicit).
-- A route with policies denies on **any** policy denying (deny-overrides),
-  on an unsatisfied `require`, and on a Rego evaluation error (never
-  silently allows on error).
+- A route with an empty `access.authorize` skips the authorization gate
+  (default-allow — authorization is opt-in per route, not implicit).
+- A route with `access.authorize` names denies on **any** policy denying
+  (deny-overrides), on an unsatisfied `require`, and on a Rego evaluation
+  error (never silently allows on error).
 - Denied requests get a generic `403 forbidden` with no policy detail in
   the body — the reason is logged and recorded on the trace span, not
   returned to the client.
@@ -106,12 +124,44 @@ verification. It exists for internal backends with self-signed certs you
 already trust by network position — don't set it for anything reachable
 outside your own infrastructure.
 
-!!! note "The CSRF/security-headers middleware slot is reserved, not yet implemented"
-    HOG's fixed middleware chain has a named `security` slot between the
-    access log and session resolution, intended for CSRF defenses and
-    security response headers. In the current codebase that slot is a
-    pass-through placeholder — no security headers or CSRF checks are
-    applied by HOG itself yet. Until it ships, apply security headers
-    (`Content-Security-Policy`, `X-Frame-Options`, `Strict-Transport-Security`,
-    etc.) and any additional CSRF protection at your load balancer/CDN, and
-    rely on `SameSite=Lax` as described above in the meantime.
+## CSRF protection and security headers are on by default
+
+`Gateway.spec.security` is applied gateway-wide, wrapping the whole handler
+just inside the `forwarded` layer and just outside OpenTelemetry/routing —
+it covers every route and the raw `/auth/*` endpoints alike, not just some
+routes.
+
+- **CSRF (`security.csrf`, on by default).** Built on
+  `net/http.CrossOriginProtection`: a token-less, Fetch-metadata-based
+  defense that allows `GET`/`HEAD`/`OPTIONS`, same-origin requests, and
+  non-browser requests (no `Sec-Fetch-Site`/`Origin` header — so
+  `Authorization: Bearer` API clients are entirely unaffected), and rejects a
+  cross-origin, state-changing browser request with `403`. This is
+  **defense-in-depth on top of `SameSite=Lax`** (above), not a replacement
+  for it — `SameSite=Lax` is still what keeps the session cookie itself off
+  cross-site requests in the first place.
+- **Security response headers (`security.headers`, on by default).**
+  `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, and
+  `Strict-Transport-Security` (1 year, `includeSubDomains`) are set on every
+  response unless you override or blank them out. `Content-Security-Policy`
+  is opt-in (unset by default) — HOG can't pick a safe default CSP without
+  knowing your frontend's script/style/asset origins.
+
+See the [configuration reference](configuration.md#gateway-security) for the
+full field table and defaults.
+
+!!! warning "A same-site, cross-origin SPA needs `csrf.trustedOrigins`"
+    If your frontend and HOG share a registrable domain but live on different
+    subdomains — e.g. `app.example.com` calling a HOG instance at
+    `api.example.com` — the browser sends `Sec-Fetch-Site: same-site`, which
+    `CrossOriginProtection` still treats as cross-origin. A state-changing
+    request (`POST`/`PUT`/`PATCH`/`DELETE`) from that frontend gets `403`
+    until you add `https://app.example.com` to `security.csrf.trustedOrigins`.
+
+!!! note "`bypassPatterns` is a deliberate CSRF hole"
+    `security.csrf.bypassPatterns` exempts specific `ServeMux`-style patterns
+    from CSRF checking entirely — for an endpoint that legitimately can't
+    send `Origin`/`Sec-Fetch-Site` (e.g. a third-party webhook receiver).
+    Scope each pattern as narrowly as possible; anything it matches accepts
+    cross-origin state-changing requests with no CSRF defense at all.

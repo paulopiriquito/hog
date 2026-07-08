@@ -18,6 +18,7 @@ import (
 	"github.com/paulopiriquito/hog/idp"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/route"
+	"github.com/paulopiriquito/hog/security"
 	"github.com/paulopiriquito/hog/selector"
 	"github.com/paulopiriquito/hog/session"
 	"github.com/paulopiriquito/hog/telemetry"
@@ -195,6 +196,19 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
+	trusted, err := chain.ParseTrustedProxies(cfg.Gateway.TrustedProxies)
+	if err != nil {
+		return nil, err
+	}
+	forwarded := chain.Forwarded(trusted)
+	secCfg, err := security.Parse(cfg.Gateway.Security)
+	if err != nil {
+		return nil, err
+	}
+	securityMW, err := security.Build(secCfg)
+	if err != nil {
+		return nil, err
+	}
 	for _, rt := range cfg.Routes {
 		if prev, dup := seen[rt.Match]; dup {
 			return nil, fmt.Errorf("route %q: duplicate match %q (already used by route %q)", rt.Name, rt.Match, prev)
@@ -236,9 +250,9 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		}
 		// Authz is resolved independent of authActive: a policy may authorize
 		// on request attributes alone, without a session/IdP configured.
-		if len(resolved.Policies) > 0 {
-			pols := make([]*authz.Policy, 0, len(resolved.Policies))
-			for _, name := range resolved.Policies {
+		if len(resolved.Authorize) > 0 {
+			pols := make([]*authz.Policy, 0, len(resolved.Authorize))
+			for _, name := range resolved.Authorize {
 				pol, ok := compiledPolicies[name]
 				if !ok {
 					return nil, fmt.Errorf("route %q: unknown policy %q", rt.Name, name)
@@ -260,7 +274,12 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		}
 		h := auth.NewHandlers(active, sess, sealer, authCfg, *sessCfg, idCfg)
 		mux.HandleFunc(authCfg.LoginPath, h.Login)
-		mux.HandleFunc(authCfg.LogoutPath, h.Logout)
+		// Logout is state-changing, so it is POST-only (a non-POST gets 405 from the
+		// mux). Same-origin is enforced by the gateway-wide security stage: a POST is
+		// an unsafe method, so CrossOriginProtection rejects a cross-origin logout.
+		// This closes cross-site forced-logout (the old any-method mount allowed a
+		// cross-site GET navigation to clear the session).
+		mux.HandleFunc("POST "+authCfg.LogoutPath, h.Logout)
 		mux.HandleFunc(callbackPath(cfg.IdPResources), h.Callback)
 		mux.Handle(sessCfg.InfoPath, session.InfoHandler(sess))
 	}
@@ -270,6 +289,21 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	// traceparent (Datadog-interoperable distributed tracing), not start a new
 	// linked trace.
 	var handler http.Handler = otelhttp.NewHandler(mux, "hog")
+	// Gateway-wide edge layers wrap the whole mux (routes AND the raw /auth/*
+	// endpoints), applied gateway-wide instead of as per-route skeleton slots
+	// so they also cover the raw auth endpoints. security (CSRF + response
+	// headers) wraps otel, so it runs BEFORE otel creates the span: a CSRF
+	// 403 short-circuits before the span exists and is intentionally not
+	// traced. security only reads Origin/Sec-Fetch-Site/Host and sets
+	// response headers, so it composes cleanly under forwarded.
+	handler = securityMW.Wrap(handler)
+	// forwarded is the single OUTERMOST wrapper of the whole handler, so it
+	// runs first, before security and otel: otel reads raw X-Forwarded-For
+	// for the span's client.address, so untrusted
+	// X-Forwarded-*/Forwarded/X-Real-IP headers must be stripped before otel
+	// (or any route) ever sees them. forwarded never touches traceparent, so
+	// trace continuation from a trusted LB is unaffected.
+	handler = forwarded.Wrap(handler)
 	return &App{Handler: handler, IdP: active, Session: sess}, nil
 }
 

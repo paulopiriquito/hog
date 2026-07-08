@@ -51,7 +51,7 @@ spec:
   handler:
     type: static
     dir: /srv/web
-  policy: { auth: required }
+  access: { auth: required }
 ---
 kind: Route
 metadata: { name: api }
@@ -62,7 +62,7 @@ spec:
     upstream: http://backend:9000
     stripPrefix: /api
     forwardAccessToken: true
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
 A few things worth noting:
@@ -74,7 +74,7 @@ A few things worth noting:
   becomes the callback route automatically (`/auth/callback` here) — you
   don't declare a `Route` for it.
 - The `/` route is `type: app` (inferred from `handler.type: static`) with
-  `policy.auth: required`. Because `app` routes redirect rather than 401, an
+  `access.auth: required`. Because `app` routes redirect rather than 401, an
   unauthenticated visit to `/` sends the browser straight into the login
   flow with **no frontend auth code** — no JS needed to detect "not logged
   in" and kick off login.

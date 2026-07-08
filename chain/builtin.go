@@ -21,7 +21,12 @@ type builtin struct {
 }
 
 // Gates supplies real implementations for the reserved skeleton slots
-// (session, auth-gate, authz, projection). A nil field keeps the reserved() pass-through.
+// (session, auth-gate, authz, projection). A nil field keeps the reserved()
+// pass-through. forwarded and security are NOT skeleton slots: the app
+// applies both as gateway-wide edge layers that wrap the whole handler
+// outermost (forwarded outermost, security wrapping otel), not per-route, so
+// they cover every surface — routes and the raw auth endpoints alike — with
+// one gate instead of a per-route skeleton slot.
 type Gates struct {
 	Session    Middleware
 	AuthGate   Middleware
@@ -39,8 +44,12 @@ type Observability struct {
 // route, with the supplied gates filling their reserved slots. Developer plugins
 // are appended AFTER this list by the app, so they can never run ahead of these
 // gates. recover/request-id are always real; access-log uses obs (or its
-// default when nil); security remains a reserved pass-through;
-// session/auth-gate/authz/projection use the supplied gates (or reserved() when nil).
+// default when nil); session/auth-gate/authz/projection use the supplied
+// gates (or reserved() when nil) and are per-route. forwarded and security
+// are not part of this skeleton at all: the app applies both gateway-wide as
+// outermost wrappers of the whole handler (forwarded outermost, security
+// wrapping otel), so they cover every surface — routes and the raw auth
+// endpoints alike — with one gate instead of a per-route skeleton slot.
 func Skeleton(logger *slog.Logger, gates Gates, obs Observability) []Middleware {
 	if logger == nil {
 		logger = slog.Default()
@@ -72,7 +81,6 @@ func skeleton(logger *slog.Logger, gates Gates, obs Observability) []builtin {
 		{"recover", recoverMW(logger)},
 		{"request-id", requestIDMW()},
 		{"access-log", accessLog},
-		{"security", reserved()}, // CSRF + headers — implemented in BFF/security spec
 		{"session", orReserved(gates.Session)},
 		{"auth-gate", orReserved(gates.AuthGate)},
 		{"authz", orReserved(gates.Authz)},

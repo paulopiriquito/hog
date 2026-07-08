@@ -12,10 +12,23 @@ request's external scheme, host, and client IP from `X-Forwarded-Proto`,
 `X-Forwarded-Host`, and `X-Forwarded-For` — values that only a fronting proxy
 can set. These drive the OIDC redirect URI, the session cookie's `Secure`
 attribute, and the `X-Forwarded-*` chain HOG forwards on to backends. The
-`Gateway` resource carries a `trustedProxies` field for this trust boundary, but
-it is parsed and not yet enforced at request time — so rely on network placement:
-run HOG directly behind that proxy, with no untrusted hop in a position to inject
-its own forwarded headers.
+`Gateway` resource's `trustedProxies` field is **enforced**: a gateway-wide
+`forwarded` layer (the outermost wrapper around the whole handler, applied
+before request routing and before OpenTelemetry) strips `X-Forwarded-For`,
+`X-Forwarded-Proto`, `X-Forwarded-Host`, `X-Forwarded-Port`, `X-Real-Ip`, and
+`Forwarded` from any request whose immediate peer isn't in `trustedProxies`.
+`trustedProxies` accepts CIDRs and bare IPs; `"*"` trusts every peer; the
+default — an empty list — trusts **no** peer, so those headers are stripped
+from every request unless you configure it (the secure default). In practice
+this means: with no `trustedProxies` set, HOG only ever sees its own
+direct-connection peer address, session cookies fall back to always-`Secure`
+(since the `X-Forwarded-Proto` override that would otherwise permit a
+non-`https` cookie is stripped), and the logged/projected client IP is always
+the immediate peer, never the true client — set `trustedProxies` to your load
+balancer's/ingress's CIDR to see the real client IP and scheme. Still run HOG
+directly behind that proxy, with no untrusted hop in a position to spoof its
+own forwarded headers — `trustedProxies` establishes *which* peer is
+trusted, not that every hop before it is.
 
 ## Horizontal scaling and session state
 

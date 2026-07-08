@@ -78,7 +78,7 @@ spec:
   handler:
     type: hello
     greeting: "hi there"
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 Each entry is `<import-path>[@version]` — the package whose `init()` calls

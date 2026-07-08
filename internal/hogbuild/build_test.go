@@ -51,7 +51,7 @@ spec:
 ---
 kind: Route
 metadata: { name: p }
-spec: { match: /p, handler: { type: testecho }, policy: { auth: public } }
+spec: { match: /p, handler: { type: testecho }, access: { auth: public } }
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}

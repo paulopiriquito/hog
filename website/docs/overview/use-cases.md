@@ -20,7 +20,7 @@ metadata: { name: spa }
 spec:
   match: /
   handler: { type: static, dir: /srv/web }
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 This is the exact shape the `hog-static` base image ships with. See the

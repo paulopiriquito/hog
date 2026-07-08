@@ -50,7 +50,7 @@ spec:
         method: GET
         required: false
         forwardQuery: true
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 - **`backends[].group`** is required and unique — it's the response's merge
@@ -64,7 +64,7 @@ spec:
   sends (e.g. `?page=2`).
 - **`timeout: 3s`** bounds the whole fan-out; each backend call runs inside
   the same 3-second budget.
-- `policy: { auth: public }` keeps this example runnable without an IdP. A
+- `access: { auth: public }` keeps this example runnable without an IdP. A
   real deployment would typically pair this with `auth: required` — see
   [A BFF with OIDC login](bff-oidc.md).
 

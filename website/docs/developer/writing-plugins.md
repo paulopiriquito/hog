@@ -117,7 +117,7 @@ spec:
   handler:
     type: greeter
     message: "hi from HOG"
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 A few things worth calling out, all straight from the built-ins:

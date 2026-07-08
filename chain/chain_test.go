@@ -62,7 +62,7 @@ func TestSkeletonNamesAndOrder(t *testing.T) {
 	got := SkeletonNames()
 	want := []string{
 		"recover", "request-id", "access-log",
-		"security", "session", "auth-gate", "authz", "projection",
+		"session", "auth-gate", "authz", "projection",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("skeleton len = %d, want %d (%v)", len(got), len(want), got)
@@ -119,12 +119,14 @@ func TestSkeletonInjectsGates(t *testing.T) {
 			})
 		})
 	}
-	gates := Gates{Session: mk("session"), AuthGate: mk("auth"), Authz: mk("authz"), Projection: mk("proj")}
+	gates := Gates{
+		Session: mk("session"), AuthGate: mk("auth"), Authz: mk("authz"), Projection: mk("proj"),
+	}
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
 	Compose(terminal, Skeleton(nil, gates, Observability{})...).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 
 	// The injected gates run in their fixed skeleton positions, before the terminal;
-	// the un-instrumented reserved slots (recover/request-id/access-log/security)
+	// the un-instrumented reserved slots (recover/request-id/access-log)
 	// are pass-throughs and contribute nothing to ran.
 	got := strings.Join(ran, ",")
 	if got != "session,auth,authz,proj,terminal" {

@@ -81,7 +81,7 @@ metadata: { name: healthz, labels: { tier: system } }
 spec:
   match: /healthz
   handler: { type: health }
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 Point your load balancer's/orchestrator's liveness and readiness probes at

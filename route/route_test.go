@@ -27,29 +27,6 @@ spec:
 	}
 }
 
-func TestResolvePolicyFromGroups(t *testing.T) {
-	rs, _ := config.DecodeAll([]byte(`
-kind: RouteGroup
-metadata: { name: app-auth }
-spec:
-  selector: { matchLabels: { app: dash } }
-  policy: { auth: required }
-`))
-	g, err := ParseGroup(rs[0])
-	if err != nil {
-		t.Fatalf("ParseGroup: %v", err)
-	}
-	// Matching route inherits the policy; non-matching does not.
-	matched := ResolvePolicy(map[string]string{"app": "dash"}, []RouteGroup{g})
-	if matched.Auth != "required" {
-		t.Fatalf("matched policy = %+v, want auth=required", matched)
-	}
-	unmatched := ResolvePolicy(map[string]string{"app": "other"}, []RouteGroup{g})
-	if unmatched.Auth != "" {
-		t.Fatalf("unmatched policy = %+v, want empty", unmatched)
-	}
-}
-
 func TestParseRouteCapturesHandlerConfig(t *testing.T) {
 	rs, err := config.DecodeAll([]byte(`
 kind: Route
@@ -100,10 +77,10 @@ func TestResolveExplicitAndOverrides(t *testing.T) {
 	// group sets type service; route inline overrides auth to public
 	groups := []RouteGroup{{
 		Name: "g", Selector: selectorMatchAll(), Type: "service",
-		Policy: Policy{Auth: "required"},
+		Access: AccessSpec{Auth: "required"},
 	}}
 	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "reverse-proxy"},
-		Policy: Policy{Auth: "public"}}
+		Access: AccessSpec{Auth: "public"}}
 	r, err := Resolve(rt, groups)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +103,7 @@ func TestResolveInvalidValues(t *testing.T) {
 	if _, err := Resolve(Route{Name: "r", Type: "bogus", Handler: HandlerSpec{Type: "static"}}, nil); err == nil {
 		t.Fatal("want error for invalid type")
 	}
-	if _, err := Resolve(Route{Name: "r", Handler: HandlerSpec{Type: "static"}, Policy: Policy{Auth: "maybe"}}, nil); err == nil {
+	if _, err := Resolve(Route{Name: "r", Handler: HandlerSpec{Type: "static"}, Access: AccessSpec{Auth: "maybe"}}, nil); err == nil {
 		t.Fatal("want error for invalid auth")
 	}
 }
@@ -134,8 +111,8 @@ func TestResolveInvalidValues(t *testing.T) {
 func TestResolveProjectionOverlay(t *testing.T) {
 	gp := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Group"}}}
 	rp := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Role"}}}
-	groups := []RouteGroup{{Name: "g", Selector: selectorMatchAll(), Policy: Policy{Projection: gp}}}
-	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "static"}, Policy: Policy{Projection: rp}}
+	groups := []RouteGroup{{Name: "g", Selector: selectorMatchAll(), Access: AccessSpec{Projection: gp}}}
+	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "static"}, Access: AccessSpec{Projection: rp}}
 	r, _ := Resolve(rt, groups)
 	if r.Projection == nil || r.Projection.Session.Groups.Header != "X-Role" {
 		t.Fatalf("route projection should win: %+v", r.Projection)
@@ -144,8 +121,8 @@ func TestResolveProjectionOverlay(t *testing.T) {
 
 func TestResolveLaterGroupWins(t *testing.T) {
 	groups := []RouteGroup{
-		{Name: "g1", Selector: selectorMatchAll(), Type: "app", Policy: Policy{Auth: "public"}},
-		{Name: "g2", Selector: selectorMatchAll(), Type: "service", Policy: Policy{Auth: "required"}},
+		{Name: "g1", Selector: selectorMatchAll(), Type: "app", Access: AccessSpec{Auth: "public"}},
+		{Name: "g2", Selector: selectorMatchAll(), Type: "service", Access: AccessSpec{Auth: "required"}},
 	}
 	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "static"}}
 	r, err := Resolve(rt, groups)
@@ -160,7 +137,7 @@ func TestResolveLaterGroupWins(t *testing.T) {
 func TestResolveEmptyGroupDoesNotClobber(t *testing.T) {
 	proj := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Keep"}}}
 	groups := []RouteGroup{
-		{Name: "g1", Selector: selectorMatchAll(), Type: "service", Policy: Policy{Auth: "required", Projection: proj}},
+		{Name: "g1", Selector: selectorMatchAll(), Type: "service", Access: AccessSpec{Auth: "required", Projection: proj}},
 		{Name: "g2", Selector: selectorMatchAll()}, // matches, but Type/Auth/Projection all empty/nil
 	}
 	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "reverse-proxy"}}
@@ -183,33 +160,33 @@ func matchLabels(t *testing.T, k, v string) selector.Selector {
 	return selector.Selector{MatchLabels: map[string]string{k: v}}
 }
 
-func TestResolveUnionsPolicies(t *testing.T) {
+func TestResolveUnionsAuthorize(t *testing.T) {
 	rt := Route{
 		Name: "r", Labels: map[string]string{"tier": "api"},
 		Match: "/x", Handler: HandlerSpec{Type: "health"},
-		Policies: []string{"p1", "p2"},
+		Access: AccessSpec{Authorize: []string{"p1", "p2"}},
 	}
 	groups := []RouteGroup{
-		{Name: "g1", Selector: matchLabels(t, "tier", "api"), Policies: []string{"p2", "p3"}}, // p2 dup
-		{Name: "g2", Selector: matchLabels(t, "tier", "web"), Policies: []string{"p4"}},       // no match
+		{Name: "g1", Selector: matchLabels(t, "tier", "api"), Access: AccessSpec{Authorize: []string{"p2", "p3"}}}, // p2 dup
+		{Name: "g2", Selector: matchLabels(t, "tier", "web"), Access: AccessSpec{Authorize: []string{"p4"}}},       // no match
 	}
 	res, err := Resolve(rt, groups)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := map[string]bool{}
-	for _, p := range res.Policies {
+	for _, p := range res.Authorize {
 		if got[p] {
-			t.Fatalf("duplicate policy in resolved set: %q (%v)", p, res.Policies)
+			t.Fatalf("duplicate policy in resolved set: %q (%v)", p, res.Authorize)
 		}
 		got[p] = true
 	}
 	for _, want := range []string{"p1", "p2", "p3"} {
 		if !got[want] {
-			t.Fatalf("missing policy %q in %v", want, res.Policies)
+			t.Fatalf("missing policy %q in %v", want, res.Authorize)
 		}
 	}
 	if got["p4"] {
-		t.Fatalf("non-matching group's policy leaked in: %v", res.Policies)
+		t.Fatalf("non-matching group's policy leaked in: %v", res.Authorize)
 	}
 }

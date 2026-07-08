@@ -55,7 +55,8 @@ else is opt-in.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `listen` | string | `:8080` | The address `net/http` listens on. |
-| `trustedProxies` | []string | — | CIDR/IP list intended to scope trust of `X-Forwarded-*` headers to your ingress. Parsed and validated but **not yet enforced** at request time — see the note below. |
+| `trustedProxies` | []string | — (trusts no peer) | CIDR/IP list scoping trust of `X-Forwarded-*`/`X-Real-Ip`/`Forwarded` headers to your ingress. **Enforced** — see the note below. |
+| `security` | mapping | — | CSRF protection and security response headers, applied gateway-wide. See [Gateway: security](#gateway-security) and [security hardening](security.md). |
 | `plugins` | []string | — | Build-time module manifest for `hog-build`: `<import-path>[@version]` entries. Consumed by the build tool, not at runtime. See [installation](installation.md) and [building a custom binary](../developer/building-binaries.md). |
 | `session` | mapping | — | The session/cookie block. See [Gateway: session](#gateway-session) and [authentication](authentication.md). |
 | `identity` | mapping | — | The shared identity/passport model, used by both cookie and Bearer auth. See [Gateway: identity](#gateway-identity). |
@@ -69,13 +70,69 @@ spec:
   listen: ":8080"
 ```
 
-!!! note "`trustedProxies` is reserved"
-    The field decodes and is available on `Gateway.Settings`, but at the time
-    of writing no code path in the request pipeline consults it —
-    `X-Forwarded-Proto`/`X-Forwarded-For` are currently trusted unconditionally
-    wherever HOG reads them (e.g. to decide whether to mark cookies `Secure`).
-    Terminate TLS at a proxy that only accepts traffic from your ingress; see
-    [security hardening](security.md).
+!!! note "`trustedProxies` is enforced"
+    A gateway-wide `forwarded` layer — the outermost wrapper around the whole
+    handler, applied before routing and before OpenTelemetry — strips
+    `X-Forwarded-For`, `X-Forwarded-Proto`, `X-Forwarded-Host`,
+    `X-Forwarded-Port`, `X-Real-Ip`, and `Forwarded` from any request whose
+    immediate peer isn't listed in `trustedProxies`. Entries are CIDRs or bare
+    IPs; the literal `"*"` trusts every peer; the **default (empty list)
+    trusts no peer**, so those headers are stripped from every request until
+    you configure this field — the secure default. Set it to your load
+    balancer's/ingress's CIDR to get the real client IP, correct cookie
+    `Secure` handling, and a correct `X-Forwarded-*` chain to backends. See
+    [security hardening](security.md) and
+    [architecture: deployment](../architecture/deployment.md#behind-a-trusted-proxy).
+
+### Gateway: `security`
+
+CSRF protection and security response headers, applied as a gateway-wide
+outermost wrapper around every response — routes and the raw `/auth/*`
+endpoints alike, not a per-route setting.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `csrf.enabled` | bool | `true` | Enables `net/http.CrossOriginProtection` (Fetch-metadata based CSRF defense). Set `false` to disable entirely. |
+| `csrf.trustedOrigins` | []string | — | Origins (e.g. `https://app.example.com`) to trust for cross-origin, same-site-or-not requests. Required for a same-site-but-cross-origin browser SPA — see the note below. |
+| `csrf.bypassPatterns` | []string | — | `ServeMux`-style patterns exempted from CSRF checking (e.g. a webhook endpoint that can't send `Origin`/`Sec-Fetch-Site`). A deliberate, per-pattern CSRF hole — scope it as narrowly as possible. |
+| `headers.frameOptions` | string | `DENY` | `X-Frame-Options` value. Set to `""` to omit the header. |
+| `headers.contentTypeOptions` | string | `nosniff` | `X-Content-Type-Options` value. Set to `""` to omit the header. |
+| `headers.referrerPolicy` | string | `strict-origin-when-cross-origin` | `Referrer-Policy` value. Set to `""` to omit the header. |
+| `headers.hsts.enabled` | bool | `true` | Sets `Strict-Transport-Security`. |
+| `headers.hsts.maxAge` | int | `31536000` | `max-age` in seconds. |
+| `headers.hsts.includeSubDomains` | bool | `true` | Adds the `includeSubDomains` directive. |
+| `headers.hsts.preload` | bool | `false` | Adds the `preload` directive. |
+| `headers.contentSecurityPolicy` | string | — (unset) | `Content-Security-Policy` value. Opt-in — HOG sets no default CSP, since it depends on the specific frontend served. |
+
+```yaml
+spec:
+  security:
+    csrf:
+      enabled: true
+      trustedOrigins: [https://app.example.com]
+      bypassPatterns: []
+    headers:
+      frameOptions: DENY
+      contentTypeOptions: nosniff
+      referrerPolicy: strict-origin-when-cross-origin
+      hsts: { enabled: true, maxAge: 31536000, includeSubDomains: true }
+      contentSecurityPolicy: ""
+```
+
+CSRF protection allows `GET`/`HEAD`/`OPTIONS`, same-origin requests, and
+non-browser requests (no `Sec-Fetch-Site`/`Origin`, so Bearer/API clients are
+unaffected); it rejects a cross-origin, state-changing (unsafe-method)
+browser request with `403` unless the origin is in `csrf.trustedOrigins`.
+`SameSite=Lax` session cookies remain the primary CSRF control — CSRF
+protection here is defense-in-depth on top of them.
+
+!!! warning "A same-site, cross-origin SPA needs `csrf.trustedOrigins`"
+    A browser sends `Sec-Fetch-Site: same-site` (not `same-origin`) when your
+    SPA and HOG share a registrable domain but differ by subdomain — e.g. a
+    frontend at `app.example.com` calling a HOG instance at
+    `api.example.com`. `CrossOriginProtection` treats that as cross-origin: a
+    state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) gets `403` until
+    you add `https://app.example.com` to `csrf.trustedOrigins`.
 
 ### Gateway: `session`
 
@@ -135,7 +192,7 @@ when both `session` and an `IdP` resource are configured.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `loginPath` | string | `/auth/login` | Starts the OIDC flow; redirects to the IdP. |
-| `logoutPath` | string | `/auth/logout` | Clears the HOG session and redirects to `session.postLogoutRedirect`. |
+| `logoutPath` | string | `/auth/logout` | **`POST`-only** endpoint that clears the HOG session and redirects to `session.postLogoutRedirect`. A non-`POST` returns `405`; a cross-origin `POST` is rejected by the security stage. |
 
 The callback path is **not** set here — it's derived from the `IdP`
 resource's `redirectURL` path (default `/auth/callback` if none is
@@ -184,8 +241,7 @@ A single routable endpoint. `match` and `handler.type` are required.
 | `match` | string | — | **Required.** A [`net/http.ServeMux`](https://pkg.go.dev/net/http#ServeMux) pattern, e.g. `/api/users/{id}`, `GET /health`, `/app/` (trailing slash = subtree). Must be unique across all routes. |
 | `type` | string | inferred | `app` or `service`. If unset, inferred from `handler.type`: `reverse-proxy`/`api` → `service`; everything else (`static`, …) → `app`. Determines the default `auth` and how the auth gate responds (redirect vs. `401`). |
 | `handler` | mapping | — | **Required.** `{ type: <name>, ...handler-specific fields }` — see [Handler types](#handler-types). |
-| `policy` | mapping | — | This route's own `auth`/`projection` (see [Policy](#policy-route-auth-projection) below). Always wins over a matching `RouteGroup`. |
-| `policies` | []string | — | Names of `kind: Policy` (authorization) resources to enforce on this route, unioned with any matching `RouteGroup`'s `policies`. See [authorization](authorization.md). |
+| `access` | mapping | — | This route's own `auth`/`authorize`/`projection` (see [Access](#access-route-auth-authorize-projection) below). Always wins over a matching `RouteGroup`. |
 
 ```yaml
 kind: Route
@@ -196,18 +252,20 @@ spec:
   handler:
     type: api
     backends: [...]
-  policy: { auth: required }
-  policies: [admins-only]
+  access:
+    auth: required
+    authorize: [admins-only]
 ```
 
-### Policy (route `auth` + projection)
+### Access (route `auth` + `authorize` + `projection`)
 
 Not to be confused with the `kind: Policy` authorization resource — this is
-the inline `policy:` block on a `Route`/`RouteGroup`.
+the inline `access:` block on a `Route`/`RouteGroup`.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `auth` | string | inferred | `required` or `public`. Unset defaults from the route's `type`: `service` → `required`, `app` → `public`. |
+| `authorize` | []string | — | Names of `kind: Policy` (authorization) resources to enforce on this route, unioned with any matching `RouteGroup`'s `access.authorize`. See [authorization](authorization.md). |
 | `projection` | mapping | derive from passport | Customizes the `X-User-*` headers injected for the backend. See below. |
 
 `projection`:
@@ -220,8 +278,9 @@ the inline `policy:` block on a `Route`/`RouteGroup`.
 
 ```yaml
 spec:
-  policy:
+  access:
     auth: required
+    authorize: [admins-only]
     projection:
       session:
         claims:
@@ -234,18 +293,18 @@ spec:
 
 ## RouteGroup
 
-Applies a shared `policy` to every `Route` whose labels match `selector` —
-the same pattern as a Kubernetes Service selecting Pods. A route's own
-`spec.policy`/`spec.policies` always wins over a matching group; when
-several groups match, later groups (document order) override earlier ones
-field-by-field.
+Applies a shared `access` block to every `Route` whose labels match
+`selector` — the same pattern as a Kubernetes Service selecting Pods. A
+route's own `spec.access` always wins over a matching group field-by-field
+(its own `access.authorize` is unioned with, not replaced by, a matching
+group's); when several groups match, later groups (document order) override
+earlier ones field-by-field.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `type` | string | — | Default route `type` (`app`/`service`) for matching routes that don't set their own. |
 | `selector` | mapping | matches everything | `matchLabels` (exact-match map) and/or `matchExpressions` (see below). |
-| `policy` | mapping | — | Same shape as [Route's `policy`](#policy-route-auth-projection). |
-| `policies` | []string | — | Authorization policy names, unioned into every matching route's effective set. |
+| `access` | mapping | — | Same shape as [Route's `access`](#access-route-auth-authorize-projection). |
 
 `selector.matchExpressions[]`:
 
@@ -261,8 +320,9 @@ metadata: { name: app-auth }
 spec:
   selector:
     matchLabels: { tier: api }
-  policy: { auth: required }
-  policies: [require-admins]
+  access:
+    auth: required
+    authorize: [require-admins]
 ```
 
 ---
@@ -270,8 +330,8 @@ spec:
 ## Policy (authorization)
 
 A named, reusable authorization unit referenced from `Route`/`RouteGroup`
-`policies:`. See [authorization](authorization.md) for how policies combine
-and evaluate; this table is the field reference.
+`access.authorize:`. See [authorization](authorization.md) for how policies
+combine and evaluate; this table is the field reference.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -320,7 +380,7 @@ spec:
   handler:
     type: static
     dir: /srv/web
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 ### `reverse-proxy`
@@ -400,7 +460,7 @@ A built-in liveness/readiness handler. No config fields — it always returns
 spec:
   match: /healthz
   handler: { type: health }
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 ---

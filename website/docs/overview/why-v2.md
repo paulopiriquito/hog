@@ -32,12 +32,14 @@ at `init()` and are compiled into the binary alongside the built-ins — full
 type safety, exact dependency versions, and zero per-request plugin-loading
 overhead, at the cost of a rebuild to change the plugin set.
 
-**Its own middleware chain.** v2's request pipeline is a fixed built-in
-skeleton — recover, request-ID, access log, security, session, auth gate,
-authz, projection — with two guarded slots for your code. There is no
-privileged "core" code path: HOG's own features (static serving, proxying,
-aggregation, authentication, authorization, observability) are built on the
-same module contract a third-party plugin uses.
+**Its own middleware chain.** v2's request pipeline wraps two gateway-wide
+edge layers — trusted-proxy normalization (`forwarded`) and CSRF/security
+headers (`security`) — around everything, then a fixed built-in per-route
+skeleton: recover, request-ID, access log, session, auth gate, authz,
+projection, with two guarded slots for your code. There is no privileged
+"core" code path: HOG's own features (static serving, proxying, aggregation,
+authentication, authorization, observability) are built on the same module
+contract a third-party plugin uses.
 
 ## Design ethos
 

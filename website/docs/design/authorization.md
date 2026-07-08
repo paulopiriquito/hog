@@ -55,20 +55,22 @@ denial from logs and traces.
 
 ## Referencing policies from routes
 
-Routes and route groups opt into authorization with a `policies:` list of
-policy names — distinct from the existing `policy.auth` block, which governs
-authentication. A route group's policies apply to every route its selector
-matches, so a policy can be attached once and inherited broadly (an empty
-selector scopes it to all routes); the effective set for a request is the
-union of the route's own policies and every matching group's, deduplicated.
-A policy name with no matching `Policy` resource fails the build.
+Routes and route groups opt into authorization with an `access.authorize:`
+list of policy names — a field on the same `access` block that also governs
+authentication (`access.auth`) and identity projection. A route group's
+`access.authorize` applies to every route its selector matches, so a policy
+can be attached once and inherited broadly (an empty selector scopes it to
+all routes); the effective set for a request is the union of the route's own
+`access.authorize` and every matching group's, deduplicated. A policy name
+with no matching `Policy` resource fails the build.
 
 ```yaml
 kind: Route
 metadata: { name: admin, labels: { tier: api } }
 spec:
   match: /admin/
-  policies: [admins-only]
+  access:
+    authorize: [admins-only]
 ```
 
 ## Confinement: OPA stays in one package

@@ -138,7 +138,7 @@ spec:
     index: index.html
     spaFallback: false
     cacheControl: "public, max-age=3600"
-  policy: { auth: public }
+  access: { auth: public }
 ```
 
 Layer this on `hog-runtime` instead — the vanilla image, so you own the

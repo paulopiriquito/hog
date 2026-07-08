@@ -1,5 +1,5 @@
-// Package route defines Route and RouteGroup resources and resolves
-// selector-based group policy onto routes.
+// Package route defines Route and RouteGroup resources and resolves each
+// route's effective access block from selector-matched groups.
 package route
 
 import (
@@ -40,18 +40,19 @@ func (h *HandlerSpec) UnmarshalYAML(node *yaml.Node) error {
 
 // Route is a single routable endpoint.
 type Route struct {
-	Name     string
-	Labels   map[string]string
-	Match    string      `yaml:"match"`
-	Type     string      `yaml:"type"`
-	Handler  HandlerSpec `yaml:"handler"`
-	Policy   Policy      `yaml:"policy"`
-	Policies []string    `yaml:"policies"`
+	Name    string
+	Labels  map[string]string
+	Match   string      `yaml:"match"`
+	Type    string      `yaml:"type"`
+	Handler HandlerSpec `yaml:"handler"`
+	Access  AccessSpec  `yaml:"access"`
 }
 
-// Policy is the per-route/group auth + projection configuration.
-type Policy struct {
-	Auth       string            `yaml:"auth"` // required | public
+// AccessSpec is a route's (or group's) access-control block: authentication,
+// authorization policy references, and identity projection.
+type AccessSpec struct {
+	Auth       string            `yaml:"auth"`      // required | public
+	Authorize  []string          `yaml:"authorize"` // names of kind: Policy resources
 	Projection *ProjectionConfig `yaml:"projection"`
 }
 
@@ -73,13 +74,12 @@ type GroupsProjection struct {
 	Header string `yaml:"header"`
 }
 
-// RouteGroup applies a Policy to every route matching its selector.
+// RouteGroup applies an access block to every route matching its selector.
 type RouteGroup struct {
 	Name     string
 	Type     string            `yaml:"type"`
 	Selector selector.Selector `yaml:"selector"`
-	Policy   Policy            `yaml:"policy"`
-	Policies []string          `yaml:"policies"`
+	Access   AccessSpec        `yaml:"access"`
 }
 
 // ParseRoute decodes a Route resource.
@@ -112,36 +112,18 @@ func ParseGroup(r config.Resource) (RouteGroup, error) {
 	return out, nil
 }
 
-// ResolvePolicy merges the policies of every group whose selector matches the
-// given route labels. Later groups override earlier non-empty fields.
-//
-// Deprecated: use Resolve, which also resolves route type, default auth, and
-// projection. Retained for its existing test coverage.
-func ResolvePolicy(labels map[string]string, groups []RouteGroup) Policy {
-	var p Policy
-	for _, g := range groups {
-		if g.Selector.Matches(labels) {
-			if g.Policy.Auth != "" {
-				p.Auth = g.Policy.Auth
-			}
-		}
-	}
-	return p
-}
-
-// Resolved is a route's effective auth/projection configuration.
+// Resolved is a route's effective type, auth, projection, and authorization set.
 type Resolved struct {
 	Type       string // app | service
 	Auth       string // required | public
 	Projection *ProjectionConfig
-	Policies   []string
+	Authorize  []string // names of kind: Policy resources to enforce
 }
 
 // Resolve computes a route's effective type, auth, projection, and authorization
-// policy set (the union of the route's own `policies` with every matching
-// RouteGroup's, deduped) from the route's own fields, the matching RouteGroup
-// policies (document order, later wins), and type-inferred defaults. Returns an
-// error on an invalid type/auth value.
+// set (the route's own access.authorize unioned with every matching RouteGroup's,
+// deduped) from the route's own fields, matching RouteGroups (document order,
+// later wins for scalars), and type-inferred defaults.
 func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 	var gType, gAuth string
 	var proj *ProjectionConfig
@@ -150,11 +132,11 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 			if g.Type != "" {
 				gType = g.Type
 			}
-			if g.Policy.Auth != "" {
-				gAuth = g.Policy.Auth
+			if g.Access.Auth != "" {
+				gAuth = g.Access.Auth
 			}
-			if g.Policy.Projection != nil {
-				proj = g.Policy.Projection
+			if g.Access.Projection != nil {
+				proj = g.Access.Projection
 			}
 		}
 	}
@@ -168,7 +150,7 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("route %q: invalid type %q (want app|service)", rt.Name, typ)
 	}
 
-	auth := firstNonEmpty(rt.Policy.Auth, gAuth)
+	auth := firstNonEmpty(rt.Access.Auth, gAuth)
 	if auth == "" {
 		if typ == "service" {
 			auth = "required"
@@ -181,28 +163,28 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 		return Resolved{}, fmt.Errorf("route %q: invalid auth %q (want required|public)", rt.Name, auth)
 	}
 
-	if rt.Policy.Projection != nil {
-		proj = rt.Policy.Projection
+	if rt.Access.Projection != nil {
+		proj = rt.Access.Projection
 	}
 
-	var policies []string
+	var authorize []string
 	seen := map[string]bool{}
 	add := func(names []string) {
 		for _, n := range names {
 			if n != "" && !seen[n] {
 				seen[n] = true
-				policies = append(policies, n)
+				authorize = append(authorize, n)
 			}
 		}
 	}
-	add(rt.Policies)
+	add(rt.Access.Authorize)
 	for _, g := range groups {
 		if g.Selector.Matches(rt.Labels) {
-			add(g.Policies)
+			add(g.Access.Authorize)
 		}
 	}
 
-	return Resolved{Type: typ, Auth: auth, Projection: proj, Policies: policies}, nil
+	return Resolved{Type: typ, Auth: auth, Projection: proj, Authorize: authorize}, nil
 }
 
 // inferType maps a handler type to a default route type.

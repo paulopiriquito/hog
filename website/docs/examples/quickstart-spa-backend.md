@@ -102,7 +102,7 @@ spec:
   handler:
     type: static
     dir: /srv/web
-  policy: { auth: required }
+  access: { auth: required }
 ---
 kind: Route
 metadata: { name: api }
@@ -113,7 +113,7 @@ spec:
     upstream: http://backend:9000
     stripPrefix: /api
     forwardAccessToken: true
-  policy: { auth: required }
+  access: { auth: required }
 ```
 
 - The `app` route (`type: static`, inferred `type: app`) redirects an
@@ -126,7 +126,9 @@ spec:
 - `forwardAccessToken: true` puts the caller's access token on the request
   to the backend; it's off by default.
 - `/auth/login`, `/auth/logout`, and `/auth/session` are mounted
-  automatically because both `session` and an `IdP` are configured — no
+  automatically because both `session` and an `IdP` are configured. Log out
+  with a same-origin `POST` (`fetch('/auth/logout', { method: 'POST' })`) —
+  it is `POST`-only, so a plain link (`GET`) returns `405` — no
   `Route` resources needed for them, and `redirectURL`'s path
   (`/auth/callback`) becomes the callback route the same way.
 
@@ -266,7 +268,7 @@ before proxying, and HOG rewrites the request before it reaches
   There's exactly one active `IdP` resource per config.
 - **A public shell, gated API** — if you'd rather the SPA shell always
   load (so it can show its own "sign in" state) and only the API redirect
-  to `401`, set `policy: { auth: public }` on the `app` route and leave
+  to `401`, set `access: { auth: public }` on the `app` route and leave
   `auth: required` only on `api`. The SPA then reacts to a `401` from
   `/api/...` itself, e.g. by redirecting to `/auth/login?return_to=...`
   from JavaScript.

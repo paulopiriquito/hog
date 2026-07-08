@@ -114,7 +114,11 @@ per request.
   `curl` won't show this problem (it doesn't enforce `Secure`), which makes
   it confusing. Fix: front local dev with TLS, or a proxy that sets
   `X-Forwarded-Proto: http` deliberately if you really want a non-TLS
-  cookie for testing.
+  cookie for testing — and remember `trustedProxies` is **enforced**: that
+  header is stripped unless the proxy's peer address is actually listed in
+  `Gateway.spec.trustedProxies`, so a locally configured "trust everyone"
+  (`trustedProxies: ["*"]`) or an explicit CIDR for your local proxy is what
+  makes this work. See [security hardening](security.md#terminate-tls-at-a-trusted-load-balancer-and-set-trustedproxies).
 - **Cross-site frontend and API.** The cookie is `SameSite=Lax`. A `Lax`
   cookie is withheld on cross-site subrequests (`fetch`/`XHR`, not just
   top-level navigation) — if your SPA's origin and HOG's origin aren't
