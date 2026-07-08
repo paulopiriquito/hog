@@ -1,16 +1,5 @@
-go 1.26.3
+go 1.26
 
-use (
-	.
-	pkg/forward
-	pkg/headers
-	pkg/logging
-	pkg/paths
-	pkg/pluginlogger
-	pkg/session
-	plugins/authenticator
-	plugins/static-content
-	tests/e2e
-)
-
-replace github.com/krakend/krakend-gologging/v2 v2.1.1 => ./pkg/logging
+// HOG v2 workspace — the new version lives at the repo root.
+// v1/ is archive reference only and is intentionally NOT part of this workspace.
+use .
