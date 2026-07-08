@@ -6,11 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/idp"
 	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/session"
 	"github.com/paulopiriquito/hog/terminal"
 )
 
@@ -344,6 +346,164 @@ spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: 
 	}
 }
 
+// registerEcho registers a terminal that writes the projected X-User-Id + X-User-Groups,
+// so a test can observe what the projection gate injected onto the backend-bound request.
+func registerEcho(reg *registry.Registry) {
+	reg.Register(config.KindTerminalHandler, "echo-user", func(string, registry.RawConfig) (any, error) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, r.Header.Get("X-User-Id")+"|"+r.Header.Get("X-User-Groups"))
+		}), nil
+	})
+}
+
+func mintSessionCookie(t *testing.T, key string) []*http.Cookie {
+	t.Helper()
+	m, err := session.NewManager(session.Config{
+		CookieName: "hog_session", Key: []byte(key), TTL: time.Hour,
+		FingerprintHeaders: []string{"User-Agent"}, PassportClaims: []string{"email"},
+		Groups: &session.GroupsConfig{Source: "isMemberOf", Match: []string{"ou=applicationRole"}, Render: "cn", As: "groups"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wr := httptest.NewRecorder()
+	rq := httptest.NewRequest("GET", "/", nil)
+	rq.Header.Set("User-Agent", "UA")
+	ui := map[string]any{"email": "a@b.co", "isMemberOf": []any{"cn=admins,ou=applicationRole"}}
+	s := m.New(&idp.Identity{Subject: "u-1"}, ui, &idp.Tokens{AccessToken: "at", Expiry: time.Now().Add(time.Hour)}, rq)
+	_ = m.Write(wr, rq, s)
+	return wr.Result().Cookies()
+}
+
+const testKey = "0123456789abcdef0123456789abcdef"
+
+func TestEnforcementAppRedirectsUnauth(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Route
+metadata: { name: spa, labels: { x: y } }
+spec:
+  match: /app/
+  type: app
+  handler: { type: echo-user }
+  policy: { auth: required }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/app/", nil))
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	if rec.Header().Get("Location") != "/auth/login?return_to=%2Fapp%2F" {
+		t.Fatalf("location = %q", rec.Header().Get("Location"))
+	}
+}
+
+func TestEnforcementServiceUnauth401(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  type: service
+  handler: { type: echo-user }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/api/", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+}
+
+func TestEnforcementAuthedProjects(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Route
+metadata: { name: spa, labels: { x: y } }
+spec:
+  match: /app/
+  type: app
+  handler: { type: echo-user }
+  policy: { auth: required }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/app/", nil)
+	req.Header.Set("User-Agent", "UA")
+	req.Header.Set("X-User-Id", "SPOOF") // must be stripped
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("authed status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "u-1|admins" {
+		t.Fatalf("projected body = %q, want \"u-1|admins\"", rec.Body.String())
+	}
+}
+
+func TestBuildValidatesRouteTypeWithoutSession(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: bad }
+spec:
+  match: /x/
+  type: totally-bogus
+  handler: { type: echo-user }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("Build must fail on invalid route type even without a session manager")
+	}
+}
+
 // fakeIssuer stands up a throwaway OIDC discovery+JWKS server so the IdP
 // factory's eager discovery succeeds.
 func fakeIssuer(t *testing.T) string {
@@ -360,4 +520,76 @@ func fakeIssuer(t *testing.T) string {
 		_, _ = w.Write([]byte(`{"keys":[]}`))
 	})
 	return srv.URL
+}
+
+func TestEnforcementPublicAppRouteServedUnauth(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Route
+metadata: { name: spa }
+spec:
+  match: /pub/
+  type: app
+  handler: { type: echo-user }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/pub/", nil))
+	if rec.Code != 200 {
+		t.Fatalf("public app route status = %d, want 200", rec.Code)
+	}
+	// unauthenticated ⇒ no identity projected
+	if rec.Body.String() != "|" {
+		t.Fatalf("public unauth body = %q, want \"|\"", rec.Body.String())
+	}
+}
+
+func TestEnforcementServiceAuthedProjects(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  type: service
+  handler: { type: echo-user }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/api/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("authed service status = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "u-1|admins" {
+		t.Fatalf("service projected body = %q, want \"u-1|admins\"", rec.Body.String())
+	}
 }

@@ -16,16 +16,25 @@ type builtin struct {
 	mw   Middleware
 }
 
+// Gates supplies real implementations for the reserved skeleton slots
+// (session, auth-gate, projection). A nil field keeps the reserved() pass-through.
+type Gates struct {
+	Session    Middleware
+	AuthGate   Middleware
+	Projection Middleware
+}
+
 // Skeleton returns the fixed, ordered built-in middlewares that bracket every
-// route. Developer plugins are appended AFTER this list by the app, so they can
-// never run ahead of these gates. recover/request-id/access-log are real; the
-// security…projection gates are faithful reserved pass-throughs that later
-// specs replace with real logic at these exact positions.
-func Skeleton(logger *slog.Logger) []Middleware {
+// route, with the supplied gates filling their reserved slots. Developer plugins
+// are appended AFTER this list by the app, so they can never run ahead of these
+// gates. recover/request-id/access-log are real; security and authz remain
+// reserved pass-throughs; session/auth-gate/projection use the supplied gates
+// (or reserved() when nil).
+func Skeleton(logger *slog.Logger, gates Gates) []Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	bs := skeleton(logger)
+	bs := skeleton(logger, gates)
 	out := make([]Middleware, len(bs))
 	for i, b := range bs {
 		out[i] = b.mw
@@ -35,7 +44,7 @@ func Skeleton(logger *slog.Logger) []Middleware {
 
 // SkeletonNames returns the built-in names in chain order (outermost first).
 func SkeletonNames() []string {
-	bs := skeleton(slog.Default())
+	bs := skeleton(slog.Default(), Gates{})
 	names := make([]string, len(bs))
 	for i, b := range bs {
 		names[i] = b.name
@@ -43,17 +52,25 @@ func SkeletonNames() []string {
 	return names
 }
 
-func skeleton(logger *slog.Logger) []builtin {
+func skeleton(logger *slog.Logger, gates Gates) []builtin {
 	return []builtin{
 		{"recover", recoverMW(logger)},
 		{"request-id", requestIDMW()},
 		{"access-log", accessLogMW(logger)},
-		{"security", reserved()},   // CSRF + headers — implemented in BFF/security spec
-		{"session", reserved()},    // identity resolution — auth spec
-		{"auth-gate", reserved()},  // 302 vs 401 — auth spec
-		{"authz", reserved()},      // OPA — authz spec
-		{"projection", reserved()}, // X-User-* / claims — auth spec
+		{"security", reserved()}, // CSRF + headers — implemented in BFF/security spec
+		{"session", orReserved(gates.Session)},
+		{"auth-gate", orReserved(gates.AuthGate)},
+		{"authz", reserved()}, // OPA — authz spec
+		{"projection", orReserved(gates.Projection)},
 	}
+}
+
+// orReserved returns m, or a reserved() pass-through when m is nil.
+func orReserved(m Middleware) Middleware {
+	if m == nil {
+		return reserved()
+	}
+	return m
 }
 
 // reserved is a faithful no-op holding a fixed chain position for a later spec.

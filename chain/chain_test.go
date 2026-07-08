@@ -76,7 +76,7 @@ func TestSkeletonNamesAndOrder(t *testing.T) {
 
 func TestRecoverTurnsPanicInto500(t *testing.T) {
 	boom := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })
-	h := Compose(boom, Skeleton(nil)...)
+	h := Compose(boom, Skeleton(nil, Gates{})...)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != http.StatusInternalServerError {
@@ -89,7 +89,7 @@ func TestRequestIDHeaderSet(t *testing.T) {
 	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = w.Header().Get("X-Request-Id")
 	})
-	h := Compose(terminal, Skeleton(nil)...)
+	h := Compose(terminal, Skeleton(nil, Gates{})...)
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
 	if seen == "" {
 		t.Fatal("X-Request-Id not set by skeleton")
@@ -106,5 +106,70 @@ func TestRequestIDPassthrough(t *testing.T) {
 	Compose(terminal, requestIDMW()).ServeHTTP(httptest.NewRecorder(), req)
 	if seen != "my-trace-id" {
 		t.Fatalf("passthrough = %q, want my-trace-id", seen)
+	}
+}
+
+func TestSkeletonInjectsGates(t *testing.T) {
+	var ran []string
+	mk := func(name string) Middleware {
+		return Func(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				ran = append(ran, name)
+				next.ServeHTTP(w, r)
+			})
+		})
+	}
+	gates := Gates{Session: mk("session"), AuthGate: mk("auth"), Projection: mk("proj")}
+	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
+	Compose(terminal, Skeleton(nil, gates)...).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	// The injected gates run in their fixed skeleton positions, before the terminal;
+	// the un-instrumented reserved slots (recover/request-id/access-log/security/authz)
+	// are pass-throughs and contribute nothing to ran.
+	got := strings.Join(ran, ",")
+	if got != "session,auth,proj,terminal" {
+		t.Fatalf("gate order = %q, want \"session,auth,proj,terminal\"", got)
+	}
+	// Cross-check the gates occupy the named slots in the fixed order.
+	names := SkeletonNames()
+	if indexOf(names, "session") >= indexOf(names, "auth-gate") ||
+		indexOf(names, "auth-gate") >= indexOf(names, "authz") ||
+		indexOf(names, "authz") >= indexOf(names, "projection") {
+		t.Fatalf("skeleton slot order wrong: %v", names)
+	}
+}
+
+func indexOf(ss []string, target string) int {
+	for i, s := range ss {
+		if s == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestSkeletonNilGatesAllReserved(t *testing.T) {
+	// Skeleton(nil, Gates{}) must behave exactly like the old all-reserved skeleton.
+	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	rec := httptest.NewRecorder()
+	Compose(terminal, Skeleton(nil, Gates{})...).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if rec.Code != 204 {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestSkeletonPartialGatesLeavesOthersReserved(t *testing.T) {
+	var ran []string
+	sessionMW := Func(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ran = append(ran, "session")
+			next.ServeHTTP(w, r)
+		})
+	})
+	terminal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { ran = append(ran, "terminal") })
+	Compose(terminal, Skeleton(nil, Gates{Session: sessionMW})...).
+		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	if strings.Join(ran, ",") != "session,terminal" {
+		t.Fatalf("partial gates ran = %v, want [session terminal]", ran)
 	}
 }

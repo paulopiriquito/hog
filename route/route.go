@@ -4,6 +4,7 @@ package route
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/selector"
@@ -42,18 +43,39 @@ type Route struct {
 	Name    string
 	Labels  map[string]string
 	Match   string      `yaml:"match"`
+	Type    string      `yaml:"type"`
 	Handler HandlerSpec `yaml:"handler"`
+	Policy  Policy      `yaml:"policy"`
 }
 
-// Policy is the set of shared settings a RouteGroup applies to its routes.
-// Extended by later specs; for now it carries the auth requirement only.
+// Policy is the per-route/group auth + projection configuration.
 type Policy struct {
-	Auth string `yaml:"auth"`
+	Auth       string            `yaml:"auth"` // required | public
+	Projection *ProjectionConfig `yaml:"projection"`
+}
+
+// ProjectionConfig customizes identity-header projection. The request section is
+// reserved (request-header forwarding is a deferred follow-up).
+type ProjectionConfig struct {
+	Session *SessionProjection `yaml:"session"`
+	Request yaml.Node          `yaml:"request"` // reserved; no effect in #3b
+}
+
+// SessionProjection overrides the derive-from-passport defaults.
+type SessionProjection struct {
+	Claims map[string]string `yaml:"claims"` // claim name → header name (explicit set)
+	Groups *GroupsProjection `yaml:"groups"`
+}
+
+// GroupsProjection overrides the groups header name (default derives from session Groups.As).
+type GroupsProjection struct {
+	Header string `yaml:"header"`
 }
 
 // RouteGroup applies a Policy to every route matching its selector.
 type RouteGroup struct {
 	Name     string
+	Type     string            `yaml:"type"`
 	Selector selector.Selector `yaml:"selector"`
 	Policy   Policy            `yaml:"policy"`
 }
@@ -90,6 +112,9 @@ func ParseGroup(r config.Resource) (RouteGroup, error) {
 
 // ResolvePolicy merges the policies of every group whose selector matches the
 // given route labels. Later groups override earlier non-empty fields.
+//
+// Deprecated: use Resolve, which also resolves route type, default auth, and
+// projection. Retained for its existing test coverage.
 func ResolvePolicy(labels map[string]string, groups []RouteGroup) Policy {
 	var p Policy
 	for _, g := range groups {
@@ -100,4 +125,76 @@ func ResolvePolicy(labels map[string]string, groups []RouteGroup) Policy {
 		}
 	}
 	return p
+}
+
+// Resolved is a route's effective auth/projection configuration.
+type Resolved struct {
+	Type       string // app | service
+	Auth       string // required | public
+	Projection *ProjectionConfig
+}
+
+// Resolve computes a route's effective type, auth, and projection from the route's
+// own fields, the matching RouteGroup policies (document order, later wins), and
+// type-inferred defaults. Returns an error on an invalid type/auth value.
+func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
+	var gType, gAuth string
+	var proj *ProjectionConfig
+	for _, g := range groups {
+		if g.Selector.Matches(rt.Labels) {
+			if g.Type != "" {
+				gType = g.Type
+			}
+			if g.Policy.Auth != "" {
+				gAuth = g.Policy.Auth
+			}
+			if g.Policy.Projection != nil {
+				proj = g.Policy.Projection
+			}
+		}
+	}
+
+	typ := firstNonEmpty(rt.Type, gType)
+	if typ == "" {
+		typ = inferType(rt.Handler.Type)
+	}
+	typ = strings.ToLower(typ)
+	if typ != "app" && typ != "service" {
+		return Resolved{}, fmt.Errorf("route %q: invalid type %q (want app|service)", rt.Name, typ)
+	}
+
+	auth := firstNonEmpty(rt.Policy.Auth, gAuth)
+	if auth == "" {
+		if typ == "service" {
+			auth = "required"
+		} else {
+			auth = "public"
+		}
+	}
+	auth = strings.ToLower(auth)
+	if auth != "required" && auth != "public" {
+		return Resolved{}, fmt.Errorf("route %q: invalid auth %q (want required|public)", rt.Name, auth)
+	}
+
+	if rt.Policy.Projection != nil {
+		proj = rt.Policy.Projection
+	}
+	return Resolved{Type: typ, Auth: auth, Projection: proj}, nil
+}
+
+// inferType maps a handler type to a default route type.
+func inferType(handlerType string) string {
+	switch handlerType {
+	case "reverse-proxy", "api":
+		return "service"
+	default: // static, health, system, …
+		return "app"
+	}
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

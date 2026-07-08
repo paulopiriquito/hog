@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/selector"
 )
 
 func TestParseRoute(t *testing.T) {
@@ -78,3 +79,101 @@ spec:
 		t.Fatalf("Handler.Config decoded = %+v, want dir=/web index=app.html", hc)
 	}
 }
+
+func TestResolveTypeInferenceAndDefaults(t *testing.T) {
+	groups := []RouteGroup{}
+	// static handler ⇒ app ⇒ default auth public
+	app := Route{Name: "spa", Handler: HandlerSpec{Type: "static"}}
+	r, err := Resolve(app, groups)
+	if err != nil || r.Type != "app" || r.Auth != "public" {
+		t.Fatalf("app resolve = %+v err=%v", r, err)
+	}
+	// reverse-proxy handler ⇒ service ⇒ default auth required
+	svc := Route{Name: "api", Handler: HandlerSpec{Type: "reverse-proxy"}}
+	r, err = Resolve(svc, groups)
+	if err != nil || r.Type != "service" || r.Auth != "required" {
+		t.Fatalf("service resolve = %+v err=%v", r, err)
+	}
+}
+
+func TestResolveExplicitAndOverrides(t *testing.T) {
+	// group sets type service; route inline overrides auth to public
+	groups := []RouteGroup{{
+		Name: "g", Selector: selectorMatchAll(), Type: "service",
+		Policy: Policy{Auth: "required"},
+	}}
+	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "reverse-proxy"},
+		Policy: Policy{Auth: "public"}}
+	r, err := Resolve(rt, groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Type != "service" { // from group
+		t.Errorf("type = %q", r.Type)
+	}
+	if r.Auth != "public" { // route inline overrides group
+		t.Errorf("auth = %q", r.Auth)
+	}
+	// explicit route type wins over group + inference
+	rt.Type = "app"
+	r, _ = Resolve(rt, groups)
+	if r.Type != "app" {
+		t.Errorf("route type override = %q", r.Type)
+	}
+}
+
+func TestResolveInvalidValues(t *testing.T) {
+	if _, err := Resolve(Route{Name: "r", Type: "bogus", Handler: HandlerSpec{Type: "static"}}, nil); err == nil {
+		t.Fatal("want error for invalid type")
+	}
+	if _, err := Resolve(Route{Name: "r", Handler: HandlerSpec{Type: "static"}, Policy: Policy{Auth: "maybe"}}, nil); err == nil {
+		t.Fatal("want error for invalid auth")
+	}
+}
+
+func TestResolveProjectionOverlay(t *testing.T) {
+	gp := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Group"}}}
+	rp := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Role"}}}
+	groups := []RouteGroup{{Name: "g", Selector: selectorMatchAll(), Policy: Policy{Projection: gp}}}
+	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "static"}, Policy: Policy{Projection: rp}}
+	r, _ := Resolve(rt, groups)
+	if r.Projection == nil || r.Projection.Session.Groups.Header != "X-Role" {
+		t.Fatalf("route projection should win: %+v", r.Projection)
+	}
+}
+
+func TestResolveLaterGroupWins(t *testing.T) {
+	groups := []RouteGroup{
+		{Name: "g1", Selector: selectorMatchAll(), Type: "app", Policy: Policy{Auth: "public"}},
+		{Name: "g2", Selector: selectorMatchAll(), Type: "service", Policy: Policy{Auth: "required"}},
+	}
+	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "static"}}
+	r, err := Resolve(rt, groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Type != "service" || r.Auth != "required" {
+		t.Fatalf("later group should win: type=%q auth=%q", r.Type, r.Auth)
+	}
+}
+
+func TestResolveEmptyGroupDoesNotClobber(t *testing.T) {
+	proj := &ProjectionConfig{Session: &SessionProjection{Groups: &GroupsProjection{Header: "X-Keep"}}}
+	groups := []RouteGroup{
+		{Name: "g1", Selector: selectorMatchAll(), Type: "service", Policy: Policy{Auth: "required", Projection: proj}},
+		{Name: "g2", Selector: selectorMatchAll()}, // matches, but Type/Auth/Projection all empty/nil
+	}
+	rt := Route{Name: "r", Labels: map[string]string{"x": "y"}, Handler: HandlerSpec{Type: "reverse-proxy"}}
+	r, err := Resolve(rt, groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Type != "service" || r.Auth != "required" {
+		t.Fatalf("empty later group must not clobber: type=%q auth=%q", r.Type, r.Auth)
+	}
+	if r.Projection == nil || r.Projection.Session.Groups.Header != "X-Keep" {
+		t.Fatalf("empty later group must not clobber projection: %+v", r.Projection)
+	}
+}
+
+func selectorMatchAll() selector.Selector { return selector.Selector{} }

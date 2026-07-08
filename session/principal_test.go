@@ -42,3 +42,10 @@ func TestContextRoundTripAndAccessors(t *testing.T) {
 		t.Fatal("absent claim must be false")
 	}
 }
+
+func TestFromContextNilPrincipalTreatedAsAbsent(t *testing.T) {
+	ctx := WithPrincipal(context.Background(), nil)
+	if p, ok := FromContext(ctx); ok || p != nil {
+		t.Fatalf("nil principal must read as absent: p=%v ok=%v", p, ok)
+	}
+}

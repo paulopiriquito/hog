@@ -30,9 +30,11 @@ func WithPrincipal(ctx context.Context, p *Principal) context.Context {
 }
 
 // FromContext returns the authenticated Principal, or (nil,false) if absent.
+// A stored nil pointer is treated as absent (defense-in-depth against
+// WithPrincipal(ctx, nil) inadvertently authenticating a request).
 func FromContext(ctx context.Context) (*Principal, bool) {
 	p, ok := ctx.Value(principalKey{}).(*Principal)
-	return p, ok
+	return p, ok && p != nil
 }
 
 // InGroup reports whether the request's principal belongs to group g.

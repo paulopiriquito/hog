@@ -137,6 +137,26 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
+	// Auth gates (BFF #3b): built only when a session manager is configured.
+	var sessionGate chain.Middleware
+	var loginPath, groupsAs string
+	var authCfg auth.Config
+	if sess != nil {
+		sessionGate = auth.SessionGate(sess)
+		authCfg, err = auth.FromYAML(cfg.Gateway.Auth)
+		if err != nil {
+			return nil, err
+		}
+		loginPath = authCfg.LoginPath
+		groupsAs = "groups"
+		if sessCfg.Groups != nil && sessCfg.Groups.As != "" {
+			groupsAs = sessCfg.Groups.As
+		}
+	}
+	if sess != nil && active == nil {
+		logger.Warn("session configured without an IdP: protected routes will redirect to the login path, but the auth endpoints are not mounted",
+			"loginPath", loginPath)
+	}
 	mux := http.NewServeMux()
 	seen := make(map[string]string) // match pattern -> first route name using it
 	for _, rt := range cfg.Routes {
@@ -156,17 +176,29 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		if err != nil {
 			return nil, err
 		}
-		// Order: fixed skeleton (gates) -> request-plugins -> response-plugins -> terminal.
-		mws := append([]chain.Middleware{}, chain.Skeleton(logger)...)
+		// Resolve every route's effective policy so an invalid type/auth value
+		// fails the build regardless of whether a session manager is configured.
+		resolved, rerr := route.Resolve(rt, cfg.Groups)
+		if rerr != nil {
+			return nil, rerr
+		}
+		var gates chain.Gates
+		if sess != nil {
+			gates = chain.Gates{
+				Session:    sessionGate,
+				AuthGate:   auth.AuthGate(resolved.Auth == "required", resolved.Type == "app", loginPath),
+				Projection: auth.ProjectionGate(resolved.Projection, groupsAs),
+			}
+		} else if resolved.Auth == "required" {
+			logger.Warn("route requires auth but no session is configured; it will be served WITHOUT enforcement",
+				"route", rt.Name, "match", rt.Match)
+		}
+		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates)...)
 		mws = append(mws, reqMW...)
 		mws = append(mws, respMW...)
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}
 	if active != nil && sess != nil {
-		authCfg, err := auth.FromYAML(cfg.Gateway.Auth)
-		if err != nil {
-			return nil, err
-		}
 		sealer, err := session.NewSealer(sessCfg.Key)
 		if err != nil {
 			return nil, err
