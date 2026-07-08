@@ -99,6 +99,9 @@ plugins:
   - git-committers:
       repository: paulopiriquito/hog
       branch: master
+      # Docs live under website/docs/, not the plugin's default docs/ — set the
+      # repo-relative prefix so its GitHub commit lookups resolve.
+      docs_path: website/docs/
       token: !ENV [MKDOCS_GIT_COMMITTERS_APIKEY, ""]
       enabled: !ENV [CI, false]
 
