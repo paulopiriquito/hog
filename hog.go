@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/paulopiriquito/hog/app"
+	"github.com/paulopiriquito/hog/idp"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/terminal"
 )
@@ -22,6 +23,7 @@ func Register(kind, name string, f registry.Factory) { registry.Register(kind, n
 // Run loads config from path and serves until the context is cancelled.
 func Run(ctx context.Context, path string) error {
 	terminal.Register(registry.Default) // built-in terminal handlers
+	idp.Register(registry.Default)      // built-in IdP connector
 	return app.Run(ctx, path, registry.Default, slog.Default())
 }
 

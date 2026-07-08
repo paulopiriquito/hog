@@ -27,12 +27,12 @@ func Run(ctx context.Context, path string, reg *registry.Registry, logger *slog.
 	if err != nil {
 		return err
 	}
-	handler, err := Build(cfg, reg, logger)
+	a, err := Build(cfg, reg, logger)
 	if err != nil {
 		return err
 	}
 
-	srv := &http.Server{Addr: cfg.Gateway.Listen, Handler: handler}
+	srv := &http.Server{Addr: cfg.Gateway.Listen, Handler: a.Handler}
 	var otel *http.Server
 	if cfg.Gateway.OTELPort != "" {
 		otel = &http.Server{Addr: cfg.Gateway.OTELPort, Handler: metricsStub()}

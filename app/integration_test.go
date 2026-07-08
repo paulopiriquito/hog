@@ -27,11 +27,11 @@ spec: { match: /healthz, handler: { type: health } }
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := Build(cfg, reg, nil)
+	a, err := Build(cfg, reg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(h)
+	srv := httptest.NewServer(a.Handler)
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")

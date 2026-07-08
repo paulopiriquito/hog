@@ -9,6 +9,7 @@ import (
 
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/idp"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/terminal"
 )
@@ -119,12 +120,12 @@ spec: { type: shape, selector: {} }
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := Build(cfg, reg, nil)
+	a, err := Build(cfg, reg, nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
 
 	if rec.Code != 200 {
 		t.Fatalf("status = %d", rec.Code)
@@ -171,4 +172,80 @@ func mustDecode(t *testing.T, s string) []config.Resource {
 		t.Fatalf("decode: %v", err)
 	}
 	return rs
+}
+
+func TestBuildInstantiatesSingleIdP(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+fakeIssuer(t)+`, clientID: c, clientSecret: s, redirectURL: https://app/cb }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if a.IdP == nil {
+		t.Fatal("App.IdP not set")
+	}
+}
+
+func TestBuildRejectsMultipleIdP(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	iss := fakeIssuer(t)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: IdP
+metadata: { name: a }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app/cb }
+---
+kind: IdP
+metadata: { name: b }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app/cb }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("want error for multiple IdP resources")
+	}
+}
+
+func TestParseRejectsUnknownKind(t *testing.T) {
+	rs := mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n---\nkind: Wat\nmetadata: {name: x}\nspec: {}\n")
+	if _, err := Parse(rs); err == nil {
+		t.Fatal("want error for unknown resource kind")
+	}
+}
+
+// fakeIssuer stands up a throwaway OIDC discovery+JWKS server so the IdP
+// factory's eager discovery succeeds.
+func fakeIssuer(t *testing.T) string {
+	t.Helper()
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `","authorization_endpoint":"` + srv.URL + `/a","token_endpoint":"` + srv.URL + `/t","jwks_uri":"` + srv.URL + `/jwks"}`))
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	})
+	return srv.URL
 }

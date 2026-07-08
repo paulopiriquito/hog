@@ -11,6 +11,7 @@ import (
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/gateway"
+	"github.com/paulopiriquito/hog/idp"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/route"
 	"github.com/paulopiriquito/hog/selector"
@@ -34,6 +35,14 @@ type pluginSpec struct {
 	Config   yaml.Node         `yaml:"config"`
 }
 
+// App is the assembled runtime: the request handler plus shared services that
+// auth middlewares and endpoints depend on (the active IdP today; session
+// manager and state provider in later sub-projects). IdP is nil if none configured.
+type App struct {
+	Handler http.Handler
+	IdP     idp.IdP
+}
+
 // Config is the typed, parsed configuration of a HOG instance.
 type Config struct {
 	Gateway         gateway.Settings
@@ -41,6 +50,7 @@ type Config struct {
 	Groups          []route.RouteGroup
 	RequestPlugins  []PluginInstance
 	ResponsePlugins []PluginInstance
+	IdPResources    []config.Resource
 }
 
 // Parse converts loaded resources into a typed Config. Document order (the
@@ -82,6 +92,8 @@ func Parse(resources []config.Resource) (Config, error) {
 			} else {
 				cfg.ResponsePlugins = append(cfg.ResponsePlugins, pi)
 			}
+		case config.KindIdP:
+			cfg.IdPResources = append(cfg.IdPResources, r)
 		default:
 			return Config{}, fmt.Errorf("unknown resource kind %q (%s)", r.Kind, r.Metadata.Name)
 		}
@@ -105,12 +117,17 @@ func parsePlugin(r config.Resource, order int) (PluginInstance, error) {
 	}, nil
 }
 
-// Build assembles cfg into an http.Handler: one ServeMux where each route's
-// pattern maps to its composed chain (fixed skeleton + matching request-plugins
-// + matching response-plugins + terminal). reg supplies module instances.
-func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (http.Handler, error) {
+// Build assembles cfg into an *App: one ServeMux where each route's pattern
+// maps to its composed chain (fixed skeleton + matching request-plugins +
+// matching response-plugins + terminal), plus the single active IdP (if any).
+// reg supplies module instances.
+func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	active, err := buildIdP(cfg.IdPResources, reg)
+	if err != nil {
+		return nil, err
 	}
 	mux := http.NewServeMux()
 	seen := make(map[string]string) // match pattern -> first route name using it
@@ -137,7 +154,38 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (http.Handle
 		mws = append(mws, respMW...)
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}
-	return mux, nil
+	return &App{Handler: mux, IdP: active}, nil
+}
+
+// buildIdP instantiates the single active IdP (fail-fast). Zero is allowed; two
+// or more is an error for now ("single now, multi-ready").
+func buildIdP(resources []config.Resource, reg *registry.Registry) (idp.IdP, error) {
+	switch len(resources) {
+	case 0:
+		return nil, nil
+	case 1:
+		r := resources[0]
+		var spec struct {
+			Type string `yaml:"type"`
+		}
+		if err := r.Spec.Decode(&spec); err != nil {
+			return nil, fmt.Errorf("idp %q: %w", r.Metadata.Name, err)
+		}
+		if spec.Type == "" {
+			return nil, fmt.Errorf("idp %q: spec.type is required", r.Metadata.Name)
+		}
+		m, err := reg.Build(config.KindIdP, spec.Type, registry.RawConfig{Node: r.Spec})
+		if err != nil {
+			return nil, err
+		}
+		got, ok := m.(idp.IdP)
+		if !ok {
+			return nil, fmt.Errorf("idp %q (type %q) is not an idp.IdP", r.Metadata.Name, spec.Type)
+		}
+		return got, nil
+	default:
+		return nil, fmt.Errorf("config has %d IdP resources; exactly one is supported for now", len(resources))
+	}
 }
 
 func buildTerminal(rt route.Route, reg *registry.Registry) (http.Handler, error) {
