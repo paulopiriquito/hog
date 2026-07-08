@@ -1,121 +1,73 @@
-name: Release images
-
-# Build and push the multi-platform (linux/amd64 + linux/arm64) HOG images to
-# GHCR when a release is published or a vX.Y.Z tag is pushed.
-#
-# Each architecture is built on its own NATIVE runner (amd64 on ubuntu-latest,
-# arm64 on ubuntu-24.04-arm) — no QEMU emulation, which made the previous
-# single-job multi-arch build hang on the arm64 `make all` step. A final job
-# stitches the per-arch images into multi-arch manifests.
-#
-# Two triggers are kept and do not double-fire in practice: publishing a GitHub
-# release creates the tag via the API (which does NOT emit a `push` event), so
-# `release: published` covers the "publish a release" flow, while `push: tags`
-# covers a plain `git push --tags`.
+name: release
 on:
+  push:
+    tags: ['v*.*.*']
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Release tag to build and push (e.g. v1.3.0)'
+      tag:
+        description: 'version tag, e.g. v2.0.0'
         required: true
-      alpine:
-        description: 'Alpine version to use (e.g. 3.22)'
-        required: false
-        default: '3.22'
-
 permissions:
   contents: read
   packages: write
-
-concurrency:
-  group: release-images-${{ github.event.release.tag_name || github.ref_name }}
-  cancel-in-progress: false
-
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
-
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
 jobs:
-  version:
+  images:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.v.outputs.tag }}
     steps:
-      - id: v
-        run: |
-          case "${{ github.event_name }}" in
-            release)           T="${{ github.event.release.tag_name }}" ;;
-            workflow_dispatch) T="${{ inputs.version }}" ;;
-            *)                 T="${{ github.ref_name }}" ;;
-          esac
-          [ -n "$T" ] || { echo "::error::could not resolve release tag"; exit 1; }
-          echo "tag=$T" >> "$GITHUB_OUTPUT"
-          echo "Building images for $T"
-
-  build:
-    needs: version
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # standard image (Dockerfile) — builder golang:1.26-alpine, runtime alpine
-          # (matrix default below; a workflow_dispatch run can override via the alpine input)
-          - { suffix: "",      file: Dockerfile,           alpine: "3.22", arch: amd64, runner: ubuntu-latest }
-          - { suffix: "",      file: Dockerfile,           alpine: "3.22", arch: arm64, runner: ubuntu-24.04-arm }
-          # lite image (Dockerfile.optimized) — golang:1.26-alpine3.22 / alpine:3.22
-          # (golang:1.26-alpine3.21 is not published, so the lite variant uses 3.22)
-          - { suffix: "-lite", file: Dockerfile.optimized, alpine: "3.22", arch: amd64, runner: ubuntu-latest }
-          - { suffix: "-lite", file: Dockerfile.optimized, alpine: "3.22", arch: arm64, runner: ubuntu-24.04-arm }
-    steps:
-      - uses: actions/checkout@v6
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build & push ${{ matrix.arch }}${{ matrix.suffix }}
-        uses: docker/build-push-action@v7
+      - name: Resolve version
+        id: v
+        run: echo "tag=${{ github.event.inputs.tag || github.ref_name }}" >> "$GITHUB_OUTPUT"
+      - name: hog-builder
+        uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.file }}
-          platforms: linux/${{ matrix.arch }}
+          file: build/Dockerfile.builder
+          platforms: linux/amd64,linux/arm64
           push: true
-          provenance: false
-          build-args: |
-            GOLANG_IMAGE=golang:1.26-alpine
-            GOLANG_VERSION=1.26
-            ALPINE_VERSION=${{ inputs.alpine || matrix.alpine }}
-            KRAKEND_VERSION=2.12.0
-          tags: ${{ env.IMAGE }}:${{ needs.version.outputs.tag }}-${{ matrix.arch }}${{ matrix.suffix }}
-
-  manifest:
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - { suffix: "",      latest: latest }
-          - { suffix: "-lite", latest: latest-lite }
-    steps:
-      - uses: docker/login-action@v4
+          tags: |
+            ${{ env.REGISTRY }}/hog-builder:latest
+            ${{ env.REGISTRY }}/hog-builder:${{ steps.v.outputs.tag }}
+      - name: hog-runtime
+        uses: docker/build-push-action@v6
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create multi-arch manifest${{ matrix.suffix }}
-        env:
-          TAG: ${{ needs.version.outputs.tag }}
-        run: |
-          docker buildx imagetools create \
-            -t "${IMAGE}:${TAG}${{ matrix.suffix }}" \
-            -t "${IMAGE}:${{ matrix.latest }}" \
-            "${IMAGE}:${TAG}-amd64${{ matrix.suffix }}" \
-            "${IMAGE}:${TAG}-arm64${{ matrix.suffix }}"
-          docker buildx imagetools inspect "${IMAGE}:${TAG}${{ matrix.suffix }}"
+          context: .
+          file: build/Dockerfile.runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/hog-runtime:latest
+            ${{ env.REGISTRY }}/hog-runtime:${{ steps.v.outputs.tag }}
+      - name: hog-static
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: build/Dockerfile.static
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BASE=${{ env.REGISTRY }}/hog-runtime:${{ steps.v.outputs.tag }}
+          tags: |
+            ${{ env.REGISTRY }}/hog-static:latest
+            ${{ env.REGISTRY }}/hog-static:${{ steps.v.outputs.tag }}
+      - name: hog-docs
+        uses: docker/build-push-action@v6
+        with:
+          context: website
+          file: website/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BASE=${{ env.REGISTRY }}/hog-static:${{ steps.v.outputs.tag }}
+          tags: |
+            ${{ env.REGISTRY }}/hog-docs:latest
+            ${{ env.REGISTRY }}/hog-docs:${{ steps.v.outputs.tag }}

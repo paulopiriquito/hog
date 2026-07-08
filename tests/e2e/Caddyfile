@@ -1,0 +1,15 @@
+{
+	auto_https disable_redirects
+}
+
+# :8443 (not 443) so the container can bind without a privileged-port
+# allowance under rootless podman/docker.
+app.hog.localhost:8443 {
+	tls internal
+	reverse_proxy hog-bff:8080
+}
+
+static.hog.localhost:8443 {
+	tls internal
+	reverse_proxy hog-static:8080
+}

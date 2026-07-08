@@ -1,0 +1,86 @@
+kind: Gateway
+metadata: { name: hog }
+spec:
+  listen: ":8080"
+  # e2e: Caddy is the sole ingress; trust it so X-Forwarded-Proto=https is honored (Secure cookie).
+  trustedProxies: ["0.0.0.0/0"]
+  session:
+    key: "0123456789abcdef0123456789abcdef" # 32 bytes; test-only
+  identity:
+    # dex's mockCallback connector emits a real `groups: ["authors"]` claim
+    # (unlike the local password-DB connector, which has no groups field at
+    # all), so this fixture can exercise genuine group-based authz end to
+    # end. Verified against session/identity.go / session/passport.go:
+    # projectGroups matches each raw group entry against `match` *before*
+    # rendering, so `match` must literally list every group name we want to
+    # let through — an empty/omitted match yields zero groups (fail-closed).
+    # dex's groups are plain names, not LDAP DNs, so render: dn passes them
+    # through unchanged (render: cn would only extract cn=-prefixed DN
+    # components and drop everything else).
+    groups:
+      source: groups # id_token/userinfo claim carrying the flat group-name array
+      match: ["authors", "admins"] # allowlist; kilgore carries "authors" only
+      render: dn # pass the raw group name through (no cn=... to extract)
+      as: groups
+---
+kind: IdP
+metadata: { name: dex }
+spec:
+  type: oidc
+  issuer: http://dex.hog.localhost:5556
+  clientID: hog
+  clientSecret: hog-secret
+  redirectURL: https://app.hog.localhost:8443/auth/callback
+  scopes: [openid, profile, email, groups]
+---
+kind: Policy
+metadata: { name: authors }
+spec: { require: { groups: [authors] } }
+---
+kind: Policy
+metadata: { name: admins }
+spec: { require: { groups: [admins] } }
+---
+kind: Route
+metadata: { name: shell }
+spec: { match: /, handler: { type: static, dir: /srv/web }, access: { auth: public } }
+---
+kind: Route
+metadata: { name: app }
+spec: { match: /app, type: app, handler: { type: static, dir: /srv/web }, access: { auth: required } }
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  type: service
+  handler: { type: reverse-proxy, upstream: http://backend:9000, stripPrefix: /api, forwardAccessToken: true }
+  access: { auth: required }
+---
+kind: Route
+metadata: { name: agg }
+spec:
+  match: /agg
+  type: service
+  handler:
+    type: api
+    backends:
+      - { group: one, upstream: http://backend:9000, path: /one }
+      - { group: two, upstream: http://backend:9000, path: /two }
+  access: { auth: required }
+---
+kind: Route
+metadata: { name: reports }
+spec:
+  match: /reports
+  type: service
+  handler: { type: reverse-proxy, upstream: http://backend:9000, stripPrefix: /reports }
+  access: { auth: required, authorize: [authors] }
+---
+kind: Route
+metadata: { name: admin }
+spec:
+  match: /admin
+  type: service
+  handler: { type: reverse-proxy, upstream: http://backend:9000, stripPrefix: /admin }
+  access: { auth: required, authorize: [admins] }

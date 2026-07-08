@@ -1,0 +1,21 @@
+issuer: http://dex.hog.localhost:5556
+storage: { type: memory }
+web: { http: 0.0.0.0:5556 }
+oauth2: { skipApprovalScreen: true }
+staticClients:
+  - id: hog
+    secret: hog-secret
+    name: HOG
+    redirectURIs: ["https://app.hog.localhost:8443/auth/callback"]
+# dex's local password-DB connector (storage.Password, see
+# github.com/dexidp/dex server/handlers.go handlePasswordLogin) has no
+# `groups` field, so group-based authz could never be exercised against it.
+# mockCallback is a dex-provided test connector that skips the login form
+# entirely: it auto-authenticates as a fixed identity (kilgore@kilgore.trout,
+# username "Kilgore Trout") and returns a real `groups: ["authors"]` claim,
+# which lets this fixture drive genuine group-based ALLOW/DENY policy checks
+# headlessly (curl or chromedp) with no form to fill in.
+connectors:
+  - type: mockCallback
+    id: mock
+    name: Mock

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>hog e2e</title>
+</head>
+<body>
+  <h1>hog e2e shell</h1>
+  <p>status: <span id="status">loading</span></p>
+  <p>who: <span id="who"></span></p>
+  <button id="logout">Logout</button>
+  <script>
+    function refresh() {
+      fetch('/auth/session', { credentials: 'same-origin' })
+        .then(function (res) {
+          if (res.ok) {
+            return res.json().then(function (body) {
+              document.getElementById('status').textContent = 'authenticated';
+              document.getElementById('who').textContent = body.subject || '';
+            });
+          }
+          document.getElementById('status').textContent = 'anonymous';
+          document.getElementById('who').textContent = '';
+        })
+        .catch(function () {
+          document.getElementById('status').textContent = 'error';
+        });
+    }
+
+    document.getElementById('logout').addEventListener('click', function () {
+      fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(function () {
+        location.reload();
+      });
+    });
+
+    refresh();
+  </script>
+</body>
+</html>

@@ -94,3 +94,6 @@ fabric.properties
 .idea/caches/build_file_checksums.ser
 
 .idea/
+
+# local-only design record (specs/plans) — never pushed to origin
+docs/superpowers/

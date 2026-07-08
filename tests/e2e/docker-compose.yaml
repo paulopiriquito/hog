@@ -1,0 +1,56 @@
+name: hog-e2e
+
+networks:
+  default:
+    name: hog-e2e
+
+services:
+  dex:
+    image: dexidp/dex:v2.41.1
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex/config.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "5556:5556"
+    networks:
+      default:
+        aliases:
+          - dex.hog.localhost
+
+  backend:
+    build:
+      context: ./backend
+
+  hog-bff:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile.runtime
+    volumes:
+      - ./config:/etc/hog:ro
+      - ./web:/srv/web:ro
+    depends_on:
+      - dex
+      - backend
+
+  hog-static:
+    build:
+      context: ../..
+      dockerfile: build/Dockerfile.runtime
+    volumes:
+      - ./config-static:/etc/hog:ro
+      - ./web:/srv/web:ro
+
+  caddy:
+    image: caddy:2-alpine
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "8443:8443"
+    networks:
+      default:
+        aliases:
+          - app.hog.localhost
+          - static.hog.localhost
+    depends_on:
+      - hog-bff
+      - hog-static

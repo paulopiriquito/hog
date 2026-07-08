@@ -14,3 +14,7 @@ go.work.sum
 hog
 hog-build
 *.out
+
+# test + docs trees not needed by the runtime/builder image builds
+tests/
+website/

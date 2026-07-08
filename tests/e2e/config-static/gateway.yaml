@@ -1,0 +1,7 @@
+kind: Gateway
+metadata: { name: hog }
+spec: { listen: ":8080" }
+---
+kind: Route
+metadata: { name: spa }
+spec: { match: /, handler: { type: static, dir: /srv/web }, access: { auth: public } }
