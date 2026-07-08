@@ -15,6 +15,7 @@ import (
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/route"
 	"github.com/paulopiriquito/hog/selector"
+	"github.com/paulopiriquito/hog/session"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +42,7 @@ type pluginSpec struct {
 type App struct {
 	Handler http.Handler
 	IdP     idp.IdP
+	Session session.Manager
 }
 
 // Config is the typed, parsed configuration of a HOG instance.
@@ -129,6 +131,10 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
+	sess, err := buildSession(cfg.Gateway)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	seen := make(map[string]string) // match pattern -> first route name using it
 	for _, rt := range cfg.Routes {
@@ -154,7 +160,21 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		mws = append(mws, respMW...)
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}
-	return &App{Handler: mux, IdP: active}, nil
+	return &App{Handler: mux, IdP: active, Session: sess}, nil
+}
+
+// buildSession constructs the session Manager from the Gateway's raw session
+// block. An absent block ⇒ nil manager (allowed until #3 requires it); a present
+// block with a bad key ⇒ fail-fast.
+func buildSession(g gateway.Settings) (session.Manager, error) {
+	if g.Session.Kind == 0 {
+		return nil, nil
+	}
+	cfg, err := session.FromYAML(g.Session)
+	if err != nil {
+		return nil, err
+	}
+	return session.NewManager(cfg)
 }
 
 // buildIdP instantiates the single active IdP (fail-fast). Zero is allowed; two

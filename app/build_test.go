@@ -232,6 +232,56 @@ func TestParseRejectsUnknownKind(t *testing.T) {
 	}
 }
 
+func TestBuildConstructsSessionManager(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session:
+    key: "0123456789abcdef0123456789abcdef"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if a.Session == nil {
+		t.Fatal("App.Session not constructed")
+	}
+}
+
+func TestBuildNoSessionBlockLeavesNilManager(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Session != nil {
+		t.Fatal("expected nil Session manager when no session block")
+	}
+}
+
+func TestBuildFailsFastOnBadSessionKey(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, "kind: Gateway\nmetadata: {name: hog}\nspec:\n  session:\n    key: short\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("want fail-fast on bad session key")
+	}
+}
+
 // fakeIssuer stands up a throwaway OIDC discovery+JWKS server so the IdP
 // factory's eager discovery succeeds.
 func fakeIssuer(t *testing.T) string {

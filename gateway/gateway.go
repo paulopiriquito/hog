@@ -5,16 +5,18 @@ import (
 	"fmt"
 
 	"github.com/paulopiriquito/hog/config"
+	"gopkg.in/yaml.v3"
 )
 
 // Settings is the gateway-level runtime configuration. Plugins is the
 // build-time module manifest; it is parsed here but consumed by the build
 // tool, not at runtime.
 type Settings struct {
-	Listen         string   `yaml:"listen"`
-	OTELPort       string   `yaml:"otelPort"`
-	TrustedProxies []string `yaml:"trustedProxies"`
-	Plugins        []string `yaml:"plugins"`
+	Listen         string    `yaml:"listen"`
+	OTELPort       string    `yaml:"otelPort"`
+	TrustedProxies []string  `yaml:"trustedProxies"`
+	Plugins        []string  `yaml:"plugins"`
+	Session        yaml.Node `yaml:"session"` // raw; parsed by the session package
 }
 
 // FromResource decodes a Gateway resource's spec, applying defaults.

@@ -44,3 +44,25 @@ func TestDefaults(t *testing.T) {
 		t.Fatalf("default listen = %q, want :8080", g.Listen)
 	}
 }
+
+func TestFromResourceCapturesSessionBlock(t *testing.T) {
+	rs, err := config.DecodeAll([]byte(`
+kind: Gateway
+metadata: { name: hog }
+spec:
+  listen: ":8080"
+  session:
+    key: "0123456789abcdef0123456789abcdef"
+    ttl: 2h
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := FromResource(rs[0])
+	if err != nil {
+		t.Fatalf("FromResource: %v", err)
+	}
+	if g.Session.Kind == 0 {
+		t.Fatal("session block not captured")
+	}
+}
