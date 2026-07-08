@@ -89,6 +89,18 @@ markdown_extensions:
 
 plugins:
   - search
+  # "Last update" date per page (from git history).
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+      fallback_to_build_date: true
+  # Page contributors (avatars) from GitHub. Only runs in CI, where a token is
+  # available (MKDOCS_GIT_COMMITTERS_APIKEY); skipped locally to avoid API limits.
+  - git-committers:
+      repository: paulopiriquito/hog
+      branch: master
+      token: !ENV [MKDOCS_GIT_COMMITTERS_APIKEY, ""]
+      enabled: !ENV [CI, false]
 
 nav:
   - Home: index.md

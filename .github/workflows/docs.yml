@@ -27,4 +27,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r website/requirements.txt
       - name: Build and deploy
+        env:
+          # git-committers fetches contributor avatars from the GitHub API.
+          MKDOCS_GIT_COMMITTERS_APIKEY: ${{ secrets.GITHUB_TOKEN }}
         run: mkdocs gh-deploy --force --strict -f website/mkdocs.yml

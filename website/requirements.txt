@@ -2,3 +2,5 @@
 #   pip install -r requirements.txt && mkdocs build   (or: mkdocs serve)
 mkdocs-material>=9.5
 pymdown-extensions>=10.7
+mkdocs-git-revision-date-localized-plugin>=1.2   # "last update" per page (the when)
+mkdocs-git-committers-plugin-2>=2.3              # page contributors/avatars (the who)
