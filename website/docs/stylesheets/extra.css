@@ -1,0 +1,45 @@
+/* HOG brand palette — amber accent on cool near-neutrals, matching the
+   hog-static placeholder page. Material's `primary: custom` / `accent: custom`
+   pull these variables. */
+
+:root {
+  --md-primary-fg-color: #b9812c;
+  --md-primary-fg-color--light: #cf9a3f;
+  --md-primary-fg-color--dark: #8f6420;
+  --md-accent-fg-color: #a86f1f;
+  --md-primary-bg-color: #ffffff;
+  --md-primary-bg-color--light: #ffffffcc;
+}
+
+/* Dark (slate) scheme: warmer amber so the accent stays legible on ink. */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #e3ae55;
+  --md-primary-fg-color--light: #ecc27e;
+  --md-primary-fg-color--dark: #c9913a;
+  --md-accent-fg-color: #e3ae55;
+  --md-hue: 222;
+  --md-default-bg-color: hsla(222, 16%, 9%, 1);
+}
+
+/* Slightly tighter, more technical body rhythm. */
+.md-typeset {
+  font-feature-settings: "kern", "liga", "calt";
+}
+
+.md-typeset h1,
+.md-typeset h2 {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* Give code blocks a hair more presence. */
+.md-typeset pre > code {
+  border-radius: 6px;
+}
+
+/* Home hero helpers (used by index.md). */
+.hog-tagline {
+  font-size: 1.15rem;
+  opacity: 0.85;
+  max-width: 46rem;
+}

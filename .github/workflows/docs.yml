@@ -1,0 +1,30 @@
+name: docs
+
+# Builds and publishes the HOG documentation site to GitHub Pages.
+# Runs when the site changes on the v2 branch. Enable Pages for the repo
+# (Settings -> Pages -> Source: gh-pages branch) before the first run.
+on:
+  push:
+    branches: [v2]
+    paths:
+      - website/**
+      - .github/workflows/docs.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r website/requirements.txt
+      - name: Build and deploy
+        run: mkdocs gh-deploy --force --strict -f website/mkdocs.yml

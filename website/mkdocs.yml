@@ -1,0 +1,138 @@
+site_name: HOG
+site_description: >-
+  A standard-library-first Go application gateway — a web server and BFF/API
+  gateway in a single static binary, configured with Kubernetes-style YAML.
+site_author: HOG authors
+# Empty site_url keeps generated links relative, so the same build serves from
+# GitHub Pages (a project subpath) and from a cluster (served by hog-static).
+site_url: ""
+repo_url: https://github.com/paulopiriquito/hog
+repo_name: paulopiriquito/hog
+edit_uri: edit/v2/website/docs/
+copyright: Copyright &copy; HOG authors — Apache-2.0
+
+docs_dir: docs
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.sections
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - navigation.footer
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+    - search.share
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+    edit: material/pencil
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Overview:
+      - overview/index.md
+      - Core concepts: overview/concepts.md
+      - Use cases: overview/use-cases.md
+      - Why v2: overview/why-v2.md
+  - Architecture:
+      - architecture/index.md
+      - Request lifecycle: architecture/request-lifecycle.md
+      - Configuration model: architecture/configuration-model.md
+      - Extensibility: architecture/extensibility.md
+      - Deployment topology: architecture/deployment.md
+  - Design choices:
+      - design/index.md
+      - Native Go, stdlib-first: design/native-go.md
+      - Authentication & sessions: design/auth-model.md
+      - Authorization: design/authorization.md
+      - Observability: design/observability.md
+      - Delivery: design/delivery.md
+  - Operations guide:
+      - operations/index.md
+      - Installation & images: operations/installation.md
+      - Configuration reference: operations/configuration.md
+      - Authentication: operations/authentication.md
+      - Authorization: operations/authorization.md
+      - Observability: operations/observability.md
+      - Security hardening: operations/security.md
+      - Scaling & availability: operations/scaling.md
+      - Troubleshooting: operations/troubleshooting.md
+  - Developer guide:
+      - developer/index.md
+      - Framework mode: developer/framework-mode.md
+      - Writing plugins: developer/writing-plugins.md
+      - Building a custom binary: developer/building-binaries.md
+      - Testing plugins: developer/testing.md
+      - Contributing: developer/contributing.md
+  - Examples:
+      - examples/index.md
+      - Quick start: examples/quickstart.md
+      - "Quick start: static site": examples/quickstart-static.md
+      - "Quick start: Vue SPA + backend": examples/quickstart-spa-backend.md
+      - "Quick start: API gateway": examples/quickstart-api-gateway.md
+      - BFF with OIDC: examples/bff-oidc.md
+      - API aggregation: examples/api-aggregation.md
+      - Authorization: examples/authorization.md
+      - Observability: examples/observability.md
+      - Custom plugin: examples/custom-plugin.md
+  - Releases:
+      - releases/index.md
+      - HOG v2.0.0: releases/v2.0.0.md
+      - Migrating from v1: releases/migrating-from-v1.md

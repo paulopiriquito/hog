@@ -1,0 +1,4 @@
+# Build the HOG documentation site.
+#   pip install -r requirements.txt && mkdocs build   (or: mkdocs serve)
+mkdocs-material>=9.5
+pymdown-extensions>=10.7
