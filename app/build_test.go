@@ -282,6 +282,68 @@ func TestBuildFailsFastOnBadSessionKey(t *testing.T) {
 	}
 }
 
+func TestBuildMountsAuthEndpoints(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	iss := fakeIssuer(t)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session:
+    key: "0123456789abcdef0123456789abcdef"
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app.example/auth/callback }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/auth/login", nil)
+	req.Header.Set("User-Agent", "UA")
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("/auth/login status = %d, want 302", rec.Code)
+	}
+	rec2 := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec2, httptest.NewRequest("GET", "/auth/session", nil))
+	if rec2.Code == http.StatusNotFound {
+		t.Fatal("/auth/session not mounted")
+	}
+}
+
+func TestBuildNoAuthEndpointsWithoutSession(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	iss := fakeIssuer(t)
+	cfg, _ := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+iss+`, clientID: c, clientSecret: s, redirectURL: https://app.example/auth/callback }
+`))
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/login", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/auth/login without session should be 404, got %d", rec.Code)
+	}
+}
+
 // fakeIssuer stands up a throwaway OIDC discovery+JWKS server so the IdP
 // factory's eager discovery succeeds.
 func fakeIssuer(t *testing.T) string {

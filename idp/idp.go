@@ -32,4 +32,6 @@ type IdP interface {
 	Refresh(ctx context.Context, refreshToken string) (*Tokens, error)
 	Verify(ctx context.Context, rawJWT string) (*Identity, error)
 	LogoutURL(idTokenHint, postLogoutRedirect string) (string, bool)
+	UserInfo(ctx context.Context, accessToken string) (map[string]any, error)
+	UsesPKCE() bool
 }

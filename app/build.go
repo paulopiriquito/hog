@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 
+	"github.com/paulopiriquito/hog/auth"
 	"github.com/paulopiriquito/hog/chain"
 	"github.com/paulopiriquito/hog/config"
 	"github.com/paulopiriquito/hog/gateway"
@@ -131,7 +133,7 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
-	sess, err := buildSession(cfg.Gateway)
+	sess, sessCfg, err := buildSession(cfg.Gateway)
 	if err != nil {
 		return nil, err
 	}
@@ -160,21 +162,59 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		mws = append(mws, respMW...)
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}
+	if active != nil && sess != nil {
+		authCfg, err := auth.FromYAML(cfg.Gateway.Auth)
+		if err != nil {
+			return nil, err
+		}
+		sealer, err := session.NewSealer(sessCfg.Key)
+		if err != nil {
+			return nil, err
+		}
+		h := auth.NewHandlers(active, sess, sealer, authCfg, *sessCfg)
+		mux.HandleFunc(authCfg.LoginPath, h.Login)
+		mux.HandleFunc(authCfg.LogoutPath, h.Logout)
+		mux.HandleFunc(callbackPath(cfg.IdPResources), h.Callback)
+		mux.Handle(sessCfg.InfoPath, session.InfoHandler(sess))
+	}
 	return &App{Handler: mux, IdP: active, Session: sess}, nil
+}
+
+// callbackPath derives the OAuth callback path from the single IdP resource's
+// redirectURL (it must match what the IdP redirects to). Default /auth/callback.
+func callbackPath(resources []config.Resource) string {
+	if len(resources) != 1 {
+		return "/auth/callback"
+	}
+	var spec struct {
+		RedirectURL string `yaml:"redirectURL"`
+	}
+	if err := resources[0].Spec.Decode(&spec); err != nil || spec.RedirectURL == "" {
+		return "/auth/callback"
+	}
+	u, err := url.Parse(spec.RedirectURL)
+	if err != nil || u.Path == "" {
+		return "/auth/callback"
+	}
+	return u.Path
 }
 
 // buildSession constructs the session Manager from the Gateway's raw session
 // block. An absent block ⇒ nil manager (allowed until #3 requires it); a present
 // block with a bad key ⇒ fail-fast.
-func buildSession(g gateway.Settings) (session.Manager, error) {
+func buildSession(g gateway.Settings) (session.Manager, *session.Config, error) {
 	if g.Session.Kind == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	cfg, err := session.FromYAML(g.Session)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return session.NewManager(cfg)
+	m, err := session.NewManager(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, &cfg, nil
 }
 
 // buildIdP instantiates the single active IdP (fail-fast). Zero is allowed; two

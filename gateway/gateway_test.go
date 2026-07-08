@@ -66,3 +66,14 @@ spec:
 		t.Fatal("session block not captured")
 	}
 }
+
+func TestFromResourceCapturesAuthBlock(t *testing.T) {
+	rs, _ := config.DecodeAll([]byte("kind: Gateway\nmetadata: {name: hog}\nspec:\n  auth:\n    loginPath: /signin\n"))
+	g, err := FromResource(rs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Auth.Kind == 0 {
+		t.Fatal("auth block not captured")
+	}
+}

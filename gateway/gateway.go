@@ -17,6 +17,7 @@ type Settings struct {
 	TrustedProxies []string  `yaml:"trustedProxies"`
 	Plugins        []string  `yaml:"plugins"`
 	Session        yaml.Node `yaml:"session"` // raw; parsed by the session package
+	Auth           yaml.Node `yaml:"auth"`    // raw; parsed by the auth package
 }
 
 // FromResource decodes a Gateway resource's spec, applying defaults.

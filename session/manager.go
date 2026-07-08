@@ -15,6 +15,10 @@ var (
 	ErrInvalidSession = errors.New("session: invalid session")
 )
 
+// sessionAAD domain-separates the session cookie from other sealed cookies
+// (e.g. the auth package's login cookie) that share the same key.
+var sessionAAD = []byte("hog/session/v1")
+
 // Manager builds, seals, reads, and clears sessions. The cookie implementation
 // is stateless; a Valkey-backed implementation (same interface) arrives in #5.
 type Manager interface {
@@ -56,7 +60,7 @@ func (m *cookieManager) Write(w http.ResponseWriter, r *http.Request, s *Session
 	if err != nil {
 		return err
 	}
-	value, err := m.sealer.seal(payload)
+	value, err := m.sealer.seal(payload, sessionAAD)
 	if err != nil {
 		return err
 	}
@@ -71,7 +75,7 @@ func (m *cookieManager) Read(r *http.Request) (*Session, error) {
 	if !ok {
 		return nil, ErrNoSession
 	}
-	payload, err := m.sealer.open(value)
+	payload, err := m.sealer.open(value, sessionAAD)
 	if err != nil {
 		return nil, ErrInvalidSession
 	}

@@ -18,27 +18,36 @@ type oidcConfig struct {
 	ClientSecret string   `yaml:"clientSecret"`
 	RedirectURL  string   `yaml:"redirectURL"`
 	Scopes       []string `yaml:"scopes"`
+	PKCE         *bool    `yaml:"pkce"`
 }
 
 type oidcIdP struct {
 	oauth2     *oauth2.Config
 	verifier   *oidc.IDTokenVerifier
 	endSession string
+	provider   *oidc.Provider
+	pkce       bool
 }
 
 func (o *oidcIdP) AuthCodeURL(state, nonce, codeVerifier string) string {
-	return o.oauth2.AuthCodeURL(state,
-		oauth2.AccessTypeOffline, // request a refresh_token
-		oidc.Nonce(nonce),
-		oauth2.S256ChallengeOption(codeVerifier),
-	)
+	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOffline, oidc.Nonce(nonce)}
+	if o.pkce {
+		opts = append(opts, oauth2.S256ChallengeOption(codeVerifier))
+	}
+	return o.oauth2.AuthCodeURL(state, opts...)
 }
+
+func (o *oidcIdP) UsesPKCE() bool { return o.pkce }
 
 func (o *oidcIdP) Exchange(ctx context.Context, code, codeVerifier, nonce string) (*Tokens, *Identity, error) {
 	if nonce == "" {
 		return nil, nil, errors.New("oidc: nonce must not be empty")
 	}
-	tok, err := o.oauth2.Exchange(ctx, code, oauth2.VerifierOption(codeVerifier))
+	var exchOpts []oauth2.AuthCodeOption
+	if o.pkce {
+		exchOpts = append(exchOpts, oauth2.VerifierOption(codeVerifier))
+	}
+	tok, err := o.oauth2.Exchange(ctx, code, exchOpts...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("oidc: code exchange: %w", err)
 	}
@@ -112,6 +121,18 @@ func (o *oidcIdP) LogoutURL(idTokenHint, postLogoutRedirect string) (string, boo
 	return u.String(), true
 }
 
+func (o *oidcIdP) UserInfo(ctx context.Context, accessToken string) (map[string]any, error) {
+	ui, err := o.provider.UserInfo(ctx, oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}))
+	if err != nil {
+		return nil, fmt.Errorf("oidc: userinfo: %w", err)
+	}
+	var claims map[string]any
+	if err := ui.Claims(&claims); err != nil {
+		return nil, fmt.Errorf("oidc: parse userinfo claims: %w", err)
+	}
+	return claims, nil
+}
+
 // newOIDC performs eager discovery (fail-fast) and builds the connector.
 func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 	if cfg.Issuer == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "" {
@@ -120,6 +141,10 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
 		scopes = []string{oidc.ScopeOpenID, "profile", "email"}
+	}
+	pkce := true
+	if cfg.PKCE != nil {
+		pkce = *cfg.PKCE
 	}
 	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
 	if err != nil {
@@ -139,5 +164,7 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 		},
 		verifier:   provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		endSession: disco.EndSession,
+		provider:   provider,
+		pkce:       pkce,
 	}, nil
 }

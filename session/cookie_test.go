@@ -18,20 +18,20 @@ func newSealer(t *testing.T) *sealer {
 
 func TestSealOpenRoundTripAndTamper(t *testing.T) {
 	s := newSealer(t)
-	ct, err := s.seal([]byte("hello world"))
+	ct, err := s.seal([]byte("hello world"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pt, err := s.open(ct)
+	pt, err := s.open(ct, nil)
 	if err != nil || string(pt) != "hello world" {
 		t.Fatalf("round-trip: %q %v", pt, err)
 	}
 	bad := []byte(ct)
 	bad[len(bad)/2] ^= 0x01
-	if _, err := s.open(string(bad)); err == nil {
+	if _, err := s.open(string(bad), nil); err == nil {
 		t.Fatal("tampered ciphertext must fail to open")
 	}
-	if _, err := s.open("!!!not base64!!!"); err == nil {
+	if _, err := s.open("!!!not base64!!!", nil); err == nil {
 		t.Fatal("garbage must fail to open")
 	}
 }
@@ -58,7 +58,7 @@ func TestWriteReadChunksRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("read failed")
 	}
-	got, err := s.open(joined)
+	got, err := s.open(joined, nil)
 	if err != nil || len(got) != 9000 {
 		t.Fatalf("reassembled open: len=%d err=%v", len(got), err)
 	}
@@ -123,7 +123,7 @@ func TestWriteChunkBoundary(t *testing.T) {
 
 func mustSeal(t *testing.T, s *sealer, b []byte) string {
 	t.Helper()
-	ct, err := s.seal(b)
+	ct, err := s.seal(b, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

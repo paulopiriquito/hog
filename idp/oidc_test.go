@@ -178,3 +178,50 @@ func TestVerifyAcceptsArrayAudience(t *testing.T) {
 		t.Fatalf("array aud containing clientID should verify: %v", err)
 	}
 }
+
+func TestUserInfo(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	p := buildOIDC(t, f)
+	claims, err := p.UserInfo(context.Background(), "any-access-token")
+	if err != nil {
+		t.Fatalf("UserInfo: %v", err)
+	}
+	if claims["email"] != "ui@example.com" {
+		t.Fatalf("claims = %+v", claims)
+	}
+}
+
+func TestPKCEOptional(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+
+	// default (unset) ⇒ PKCE on
+	on := buildOIDC(t, f)
+	if !on.UsesPKCE() {
+		t.Fatal("default should use PKCE")
+	}
+	u, _ := url.Parse(on.AuthCodeURL("st", "no", "verifier-1234567890123456789012345678901234567890"))
+	if u.Query().Get("code_challenge") == "" || u.Query().Get("code_challenge_method") != "S256" {
+		t.Fatalf("PKCE on: missing challenge: %s", u.RawQuery)
+	}
+
+	// pkce: false ⇒ no challenge
+	no, err := newOIDC(context.Background(), oidcConfig{
+		Type: "oidc", Issuer: f.srv.URL, ClientID: f.clientID, ClientSecret: "s",
+		RedirectURL: "https://app/cb", PKCE: boolPtr(false),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if no.UsesPKCE() {
+		t.Fatal("pkce:false should not use PKCE")
+	}
+	u2, _ := url.Parse(no.AuthCodeURL("st", "no", ""))
+	if u2.Query().Get("code_challenge") != "" {
+		t.Fatalf("PKCE off: unexpected challenge: %s", u2.RawQuery)
+	}
+	if u2.Query().Get("state") != "st" || u2.Query().Get("nonce") != "no" {
+		t.Fatalf("state/nonce must always be present: %s", u2.RawQuery)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }

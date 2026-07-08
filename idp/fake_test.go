@@ -42,6 +42,7 @@ func newFakeIdP(t *testing.T, clientID string) *fakeIdP {
 			"jwks_uri":                              f.srv.URL + "/jwks",
 			"end_session_endpoint":                  f.srv.URL + "/logout",
 			"id_token_signing_alg_values_supported": []string{"RS256"},
+			"userinfo_endpoint":                     f.srv.URL + "/userinfo",
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, jwks) })
@@ -53,6 +54,9 @@ func newFakeIdP(t *testing.T, clientID string) *fakeIdP {
 			"token_type":    "Bearer",
 			"expires_in":    3600,
 		})
+	})
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{"sub": "user-123", "email": "ui@example.com", "isMemberOf": []string{"cn=admins,ou=applicationRole"}})
 	})
 	t.Cleanup(f.srv.Close)
 	return f
