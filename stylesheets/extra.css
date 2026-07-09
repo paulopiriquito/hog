@@ -43,3 +43,8 @@
   opacity: 0.85;
   max-width: 46rem;
 }
+
+/* Navigation tabs bar: fixed earthy brown in both light and dark schemes. */
+.md-tabs {
+  background-color: #443213;
+}
