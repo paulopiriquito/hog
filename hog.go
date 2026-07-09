@@ -12,6 +12,7 @@ import (
 
 	"github.com/paulopiriquito/hog/app"
 	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/internal/configschema"
 	"github.com/paulopiriquito/hog/registry"
 	"github.com/paulopiriquito/hog/terminal"
 )
@@ -30,6 +31,14 @@ func Run(ctx context.Context, path string) error {
 // Main is the standard entrypoint for a HOG binary: parse --config, install a
 // signal-cancelled context, and Run. Exits non-zero on error.
 func Main() {
+	if len(os.Args) > 1 && os.Args[1] == "schema" {
+		if _, err := os.Stdout.Write(configschema.JSON()); err != nil {
+			slog.Error("write schema", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfgPath := flag.String("config", "/etc/hog", "path to config file or directory")
 	flag.Parse()
 

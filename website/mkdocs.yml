@@ -118,17 +118,18 @@ nav:
       - Configuration model: architecture/configuration-model.md
       - Extensibility: architecture/extensibility.md
       - Deployment topology: architecture/deployment.md
-  - Design choices:
+  - Design Choices:
       - design/index.md
       - Native Go, stdlib-first: design/native-go.md
       - Authentication & sessions: design/auth-model.md
       - Authorization: design/authorization.md
       - Observability: design/observability.md
       - Delivery: design/delivery.md
-  - Operations guide:
+  - Operations Guide:
       - operations/index.md
       - Installation & images: operations/installation.md
       - Configuration reference: operations/configuration.md
+      - Editor setup & schema validation: operations/editor-setup.md
       - Rendering config with kustomize: operations/kustomize.md
       - Authentication: operations/authentication.md
       - Authorization: operations/authorization.md
@@ -136,7 +137,7 @@ nav:
       - Security hardening: operations/security.md
       - Scaling & availability: operations/scaling.md
       - Troubleshooting: operations/troubleshooting.md
-  - Developer guide:
+  - Developer Guide:
       - developer/index.md
       - Framework mode: developer/framework-mode.md
       - Writing plugins: developer/writing-plugins.md

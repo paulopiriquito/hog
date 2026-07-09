@@ -1,0 +1,811 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://paulopiriquito.github.io/hog/hog.schema.json",
+  "title": "HOG configuration resource",
+  "description": "One Kubernetes-style resource document from a HOG config file/stream. A HOG config is a `---`-separated multi-document YAML stream where each non-empty document matches this schema; `kind` selects which spec shape applies (see the `allOf` conditionals below). A full config must contain exactly one `Gateway` resource and, conventionally, one `Telemetry` resource plus any number of Route/RouteGroup/IdP/Policy/RequestPlugin/ResponsePlugin resources — that cross-document cardinality is enforced by HOG at load time, not by this per-document schema.",
+  "type": "object",
+  "required": ["kind"],
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "description": "Conventionally \"hog.dev/v1\". HOG itself never reads or validates this field — it exists only so external tooling that cares about apiVersion/kind (kustomize, kubectl-style tooling) can identify and patch HOG resources."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["Gateway", "Route", "RouteGroup", "RequestPlugin", "ResponsePlugin", "IdP", "Telemetry", "Policy"],
+      "description": "The resource type. Determines which shape `spec` must have."
+    },
+    "metadata": { "$ref": "#/$defs/metadata" },
+    "spec": {
+      "type": "object",
+      "description": "Resource-specific configuration; its shape depends on `kind` (see the allOf conditionals below)."
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "Gateway" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/gatewaySpec" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Route" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/routeSpec" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "RouteGroup" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/routeGroupSpec" } } }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "enum": ["RequestPlugin", "ResponsePlugin"] } },
+        "required": ["kind"]
+      },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/pluginSpec" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "IdP" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/idpSpec" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Telemetry" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/telemetrySpec" } } }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "Policy" } }, "required": ["kind"] },
+      "then": { "properties": { "spec": { "$ref": "#/$defs/policySpec" } } }
+    }
+  ],
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "A list of strings."
+    },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "A map of string keys to string values."
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "The common identity block of every resource.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The resource's name, used to reference it from other resources (e.g. a Route's access.authorize lists Policy names) and as its display identifier."
+        },
+        "labels": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Arbitrary key/value labels. Matched by RouteGroup/plugin selectors, the same pattern as Kubernetes label selectors matching Pods."
+        }
+      }
+    },
+
+    "selectorRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "operator"],
+      "description": "A single set-based selector term.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "The label key to test."
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["In", "NotIn", "Exists", "DoesNotExist"],
+          "description": "How to compare the label's value (if present) against `values`. Any other operator string never matches (fails closed)."
+        },
+        "values": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Candidate values for In/NotIn. Unused (may be omitted) for Exists/DoesNotExist."
+        }
+      }
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A Kubernetes-style label selector. The zero value (no terms at all) matches everything.",
+      "properties": {
+        "matchLabels": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Exact-match label set; every key/value pair must match (logical AND)."
+        },
+        "matchExpressions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/selectorRequirement" },
+          "description": "Set-based selector terms, ANDed with matchLabels and with each other."
+        }
+      }
+    },
+
+    "sessionProjectionGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Overrides the projected groups header name.",
+      "properties": {
+        "header": {
+          "type": "string",
+          "description": "Request header name the rendered group list is injected as (default derives from identity.groups.as)."
+        }
+      }
+    },
+    "sessionProjection": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Overrides the derive-from-passport session-claim projection defaults.",
+      "properties": {
+        "claims": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Explicit claim name -> request header name mapping (replaces the default \"one X-User-<Claim> header per passport claim\" projection)."
+        },
+        "groups": { "$ref": "#/$defs/sessionProjectionGroups" }
+      }
+    },
+    "projectionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Customizes identity-header projection onto the outbound request.",
+      "properties": {
+        "session": { "$ref": "#/$defs/sessionProjection" },
+        "request": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Reserved; currently has no effect. Accepted for forward-compatibility."
+        }
+      }
+    },
+    "accessSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Access-control block: authentication requirement, authorization policy references, and identity projection. Applies to a Route or a RouteGroup.",
+      "properties": {
+        "auth": {
+          "type": "string",
+          "enum": ["required", "public"],
+          "description": "Whether a session/bearer principal is required. Defaults to \"required\" for service-type routes and \"public\" for app-type routes."
+        },
+        "authorize": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Names of `kind: Policy` resources to enforce. A route's own list is unioned (not replaced) with every matching RouteGroup's."
+        },
+        "projection": { "$ref": "#/$defs/projectionConfig" }
+      }
+    },
+
+    "handlerStatic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "dir"],
+      "description": "Built-in static-file handler config (handler.type: static).",
+      "properties": {
+        "type": { "type": "string", "const": "static" },
+        "dir": {
+          "type": "string",
+          "description": "Directory served (traversal-safe, built on os.Root). Required."
+        },
+        "index": {
+          "type": "string",
+          "description": "Filename served for the directory root and, on a miss, the SPA fallback shell. Defaults to \"index.html\"."
+        },
+        "spaFallback": {
+          "type": "boolean",
+          "description": "On a miss for an extensionless path, serve `index` instead of 404, so client-side routing can own its own URLs. Defaults to true."
+        },
+        "stripPrefix": {
+          "type": "string",
+          "description": "Prefix trimmed from the inbound path before resolving it under `dir`."
+        },
+        "cacheControl": {
+          "type": "string",
+          "description": "Cache-Control header value set on served files."
+        }
+      }
+    },
+    "handlerReverseProxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "upstream"],
+      "description": "Built-in reverse-proxy handler config (handler.type: reverse-proxy).",
+      "properties": {
+        "type": { "type": "string", "const": "reverse-proxy" },
+        "upstream": {
+          "type": "string",
+          "description": "Base URL of the backend (must parse as a URL with scheme and host). Required."
+        },
+        "stripPrefix": {
+          "type": "string",
+          "description": "Trimmed from the outbound path before proxying."
+        },
+        "preserveHost": {
+          "type": "boolean",
+          "description": "Forward the inbound Host header instead of the upstream's. Defaults to false."
+        },
+        "forwardAccessToken": {
+          "type": "boolean",
+          "description": "Inject Authorization: Bearer <access token> from the session principal onto the outbound request. Defaults to false."
+        },
+        "forwardCookies": {
+          "type": "boolean",
+          "description": "Pass the inbound Cookie header through to the upstream. Defaults to false."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Per-request timeout, a Go duration string (e.g. \"10s\"). A timeout returns 504; any other proxy error returns 502."
+        },
+        "insecureSkipVerify": {
+          "type": "boolean",
+          "description": "Disable upstream TLS certificate verification. Use only for trusted internal backends with self-signed certs. Defaults to false."
+        }
+      }
+    },
+    "handlerApiBackend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group", "upstream", "path"],
+      "description": "A single backend call aggregated by a handler.type: api route.",
+      "properties": {
+        "group": {
+          "type": "string",
+          "description": "JSON key this backend's response is merged under. Required; must be unique within the handler."
+        },
+        "upstream": {
+          "type": "string",
+          "description": "Base URL of this backend (must parse as a URL with scheme and host). Required."
+        },
+        "path": {
+          "type": "string",
+          "description": "Request path, joined onto the upstream. Supports {name} placeholders resolved from the route's own path parameters. Required."
+        },
+        "method": {
+          "type": "string",
+          "description": "HTTP method for the backend call. Defaults to GET."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "If true (the default), a failed/timed-out call fails the whole aggregated request (502/504). If false, the backend is omitted from the merged body on failure and its group name is listed in the X-Hog-Partial response header instead."
+        },
+        "forwardQuery": {
+          "type": "boolean",
+          "description": "Forward the inbound request's query string to this backend. Defaults to false."
+        },
+        "forwardAccessToken": {
+          "type": "boolean",
+          "description": "Inject Authorization: Bearer <access token> for this backend call only. Defaults to false."
+        }
+      }
+    },
+    "handlerApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "backends"],
+      "description": "Built-in API-aggregation handler config (handler.type: api): fans out to multiple backends concurrently and merges their JSON responses under one key per backend.",
+      "properties": {
+        "type": { "type": "string", "const": "api" },
+        "timeout": {
+          "type": "string",
+          "description": "Overall request timeout, a Go duration string (e.g. \"5s\"), applied to every backend call via a shared context."
+        },
+        "backends": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/handlerApiBackend" },
+          "description": "The backends to call and merge. At least one is required."
+        }
+      }
+    },
+    "handlerHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "Built-in health-check handler config (handler.type: health). Always returns a fixed {\"status\":\"ok\"} body; takes no configuration.",
+      "properties": {
+        "type": { "type": "string", "const": "health" }
+      }
+    },
+    "handler": {
+      "type": "object",
+      "required": ["type"],
+      "description": "Selects a terminal handler module and carries its config. Built-in types: static, reverse-proxy, api, health (validated below); any other value is a custom TerminalHandler module registered by a HOG plugin and is accepted as-is (its config is opaque to this schema).",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Built-in: static, reverse-proxy, api, health; extensible via TerminalHandler plugin modules."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "static" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/handlerStatic" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "reverse-proxy" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/handlerReverseProxy" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "api" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/handlerApi" }
+        },
+        {
+          "if": { "properties": { "type": { "const": "health" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/handlerHealth" }
+        }
+      ]
+    },
+
+    "routeSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["match", "handler"],
+      "description": "kind: Route spec — a single routable endpoint.",
+      "properties": {
+        "match": {
+          "type": "string",
+          "description": "A net/http.ServeMux pattern. Trailing slash means a subtree match. Must be unique across all routes. Required."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["app", "service"],
+          "description": "The route's kind. If omitted, inferred from handler.type: reverse-proxy/api infer \"service\"; everything else infers \"app\"."
+        },
+        "handler": { "$ref": "#/$defs/handler" },
+        "access": { "$ref": "#/$defs/accessSpec" }
+      }
+    },
+    "routeGroupSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "kind: RouteGroup spec — applies a shared type/access block to every Route whose labels match `selector`, the same pattern as a Kubernetes Service selecting Pods.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["app", "service"],
+          "description": "Default route type applied to matching routes that don't set their own `type`."
+        },
+        "selector": { "$ref": "#/$defs/selector" },
+        "access": { "$ref": "#/$defs/accessSpec" }
+      }
+    },
+
+    "pluginSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "kind: RequestPlugin / kind: ResponsePlugin spec — a chain-stage module instance selected by `type` (a registered plugin module name) and wired to matching routes via `selector`. No built-in request/response plugin types ship in HOG itself.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The registered plugin module name to instantiate. Required; no built-in types."
+        },
+        "selector": {
+          "$ref": "#/$defs/selector",
+          "description": "Routes this plugin instance applies to. The zero value (no terms) matches every route."
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Opaque configuration passed verbatim to the registered plugin module's factory."
+        }
+      }
+    },
+
+    "idpOIDC": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "issuer", "clientID", "clientSecret", "redirectURL"],
+      "description": "Built-in OIDC connector config (IdP.spec.type: oidc).",
+      "properties": {
+        "type": { "type": "string", "const": "oidc" },
+        "issuer": {
+          "type": "string",
+          "description": "The provider's issuer URL, used for OIDC discovery (<issuer>/.well-known/openid-configuration). Required."
+        },
+        "clientID": {
+          "type": "string",
+          "description": "The registered OAuth2 client ID. Required."
+        },
+        "clientSecret": {
+          "type": "string",
+          "description": "The registered OAuth2 client secret. Required."
+        },
+        "redirectURL": {
+          "type": "string",
+          "description": "Must match a redirect URI registered with the provider. Its path becomes HOG's callback route automatically. Required."
+        },
+        "bearerAudience": {
+          "type": "string",
+          "description": "Overrides the audience used to verify Bearer access tokens. Defaults to clientID if unset."
+        },
+        "scopes": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Requested OAuth2 scopes. Defaults to [openid, profile, email] if omitted."
+        },
+        "pkce": {
+          "type": "boolean",
+          "description": "Use PKCE (S256 code challenge) on the authorization code exchange. Defaults to true."
+        }
+      }
+    },
+    "idpSpec": {
+      "type": "object",
+      "required": ["type"],
+      "description": "kind: IdP spec — an identity-provider connector. HOG supports exactly one active IdP resource today. The entire spec (including `type`) is handed to the registered IdP module's factory, the same polymorphic pattern as a Route's handler, so a custom (non-\"oidc\") type's fields are accepted as-is. \"oidc\" is the only built-in type and is validated below.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Built-in: oidc; extensible via custom IdP modules."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "oidc" } }, "required": ["type"] },
+          "then": { "$ref": "#/$defs/idpOIDC" }
+        }
+      ]
+    },
+
+    "gatewaySessionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The encrypted, HttpOnly session cookie (stateless BFF mode). Omit this whole block to run HOG as a pure reverse-proxy/aggregation gateway with no login flow.",
+      "properties": {
+        "cookieName": {
+          "type": "string",
+          "description": "Session cookie name. Defaults to \"hog_session\"."
+        },
+        "key": {
+          "type": "string",
+          "description": "Must be exactly 32 bytes once resolved — used as an AES-256-GCM key. Required if `session` is configured."
+        },
+        "ttl": {
+          "type": "string",
+          "description": "Session lifetime, a Go duration string. Defaults to \"8h\"."
+        },
+        "fingerprintHeaders": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Request headers hashed into the session fingerprint. Defaults to [\"User-Agent\"]."
+        },
+        "infoPath": {
+          "type": "string",
+          "description": "Path serving the current session's public info. Defaults to \"/auth/session\"."
+        },
+        "postLogoutRedirect": {
+          "type": "string",
+          "description": "Path/URL to redirect to after logout. Defaults to \"/\"."
+        }
+      }
+    },
+    "gatewayIdentityGroups": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the userinfo/ID-token group list is filtered and rendered.",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "The userinfo/ID-token claim holding the group-DN (or group-name) array, e.g. isMemberOf."
+        },
+        "match": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Case-insensitive substrings; only entries containing at least one of these are kept. A groups block with no match entries never matches anything (fail-closed)."
+        },
+        "render": {
+          "type": "string",
+          "enum": ["cn", "dn"],
+          "description": "\"cn\" extracts the cn= component of each kept DN; \"dn\" keeps the whole DN/entry string unchanged. Defaults to \"cn\"."
+        },
+        "as": {
+          "type": "string",
+          "description": "Session field name / default projected-header name for the rendered group list. Defaults to \"groups\"."
+        }
+      }
+    },
+    "gatewayIdentityConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The claim/group projection model shared by cookie sessions and Bearer auth. Omitting this block uses HOG's defaults (claims: [email, name, given_name, family_name], no groups, userInfo: auto).",
+      "properties": {
+        "claims": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Passport claim allowlist persisted into the session/principal (sub is always kept separately). Defaults to [email, name, given_name, family_name]."
+        },
+        "groups": { "$ref": "#/$defs/gatewayIdentityGroups" },
+        "userInfo": {
+          "type": "string",
+          "enum": ["auto", "always", "never"],
+          "description": "When to call the userinfo endpoint: \"auto\" fetches only when a configured claim/group source is missing from the token, \"always\"/\"never\" force the behavior. Defaults to \"auto\"."
+        }
+      }
+    },
+    "gatewayCSRFConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configures net/http.CrossOriginProtection. CSRF protection is on by default.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enables Fetch-metadata CSRF defense. Defaults to true; set false to disable entirely."
+        },
+        "trustedOrigins": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Origins to trust for a same-site-but-cross-origin browser SPA (e.g. a frontend on a different subdomain than this gateway)."
+        },
+        "bypassPatterns": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Insecure CSRF-bypass path patterns, passed to CrossOriginProtection.AddInsecureBypassPattern. Use sparingly."
+        }
+      }
+    },
+    "gatewayHSTSConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configures the Strict-Transport-Security header. On by default.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Sets Strict-Transport-Security. Defaults to true; set false to disable."
+        },
+        "maxAge": {
+          "type": "integer",
+          "description": "max-age in seconds. Defaults to 31536000 (1 year)."
+        },
+        "includeSubDomains": {
+          "type": "boolean",
+          "description": "Adds the includeSubDomains directive. Defaults to true."
+        },
+        "preload": {
+          "type": "boolean",
+          "description": "Adds the preload directive. Defaults to false."
+        }
+      }
+    },
+    "gatewayHeadersConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configures the static security response headers. Set a string field to \"\" to omit that header entirely.",
+      "properties": {
+        "frameOptions": {
+          "type": "string",
+          "description": "X-Frame-Options value. Defaults to \"DENY\"; set to \"\" to omit the header."
+        },
+        "contentTypeOptions": {
+          "type": "string",
+          "description": "X-Content-Type-Options value. Defaults to \"nosniff\"; set to \"\" to omit the header."
+        },
+        "referrerPolicy": {
+          "type": "string",
+          "description": "Referrer-Policy value. Defaults to \"strict-origin-when-cross-origin\"; set to \"\" to omit the header."
+        },
+        "hsts": { "$ref": "#/$defs/gatewayHSTSConfig" },
+        "contentSecurityPolicy": {
+          "type": "string",
+          "description": "Content-Security-Policy value. HOG sets no default CSP (it depends on the frontend served) — opt in explicitly."
+        }
+      }
+    },
+    "gatewaySecurityConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CSRF protection and security response headers, applied gateway-wide as the outermost wrapper around every response (routes and the raw /auth/* endpoints alike).",
+      "properties": {
+        "csrf": { "$ref": "#/$defs/gatewayCSRFConfig" },
+        "headers": { "$ref": "#/$defs/gatewayHeadersConfig" }
+      }
+    },
+    "gatewayAuthConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Paths for the built-in login/logout endpoints.",
+      "properties": {
+        "loginPath": {
+          "type": "string",
+          "description": "Path that starts the OIDC login flow. Defaults to \"/auth/login\"."
+        },
+        "logoutPath": {
+          "type": "string",
+          "description": "Path that ends the session and (if supported by the IdP) starts RP-initiated logout. Defaults to \"/auth/logout\"."
+        }
+      }
+    },
+    "gatewayStateProviderConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "description": "Configures the stateful session backend (e.g. for server-side refresh-token storage). Omit entirely to run in pure stateless-cookie mode.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The registered StateProvider plugin module name to instantiate. Required; no built-in types ship in HOG itself."
+        },
+        "refreshSkew": {
+          "type": "string",
+          "description": "How early before the access token's expiry to silently refresh, a Go duration string. Defaults to \"60s\"; must not be negative."
+        },
+        "keyPrefix": {
+          "type": "string",
+          "description": "Key prefix used by the state provider's storage. Defaults to \"hog:sess:\"."
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Opaque configuration passed verbatim to the registered StateProvider plugin factory."
+        }
+      }
+    },
+    "gatewaySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "kind: Gateway spec — the root resource. A config must contain exactly one.",
+      "properties": {
+        "listen": {
+          "type": "string",
+          "description": "Address net/http listens on. Defaults to \":8080\" if omitted."
+        },
+        "trustedProxies": {
+          "$ref": "#/$defs/stringArray",
+          "description": "CIDRs/bare IPs trusted to set X-Forwarded-For/-Proto/-Host/-Port, X-Real-Ip, and Forwarded. A request from any other peer has those headers stripped before routing/tracing ever see it. Defaults to trusting no peer."
+        },
+        "plugins": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Build-time module manifest: Go import paths of plugin packages to link into the binary. Parsed here but consumed by the hog-build tool, not at gateway runtime."
+        },
+        "session": { "$ref": "#/$defs/gatewaySessionConfig" },
+        "identity": { "$ref": "#/$defs/gatewayIdentityConfig" },
+        "security": { "$ref": "#/$defs/gatewaySecurityConfig" },
+        "auth": { "$ref": "#/$defs/gatewayAuthConfig" },
+        "stateProvider": { "$ref": "#/$defs/gatewayStateProviderConfig" }
+      }
+    },
+
+    "telemetryOTLPConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configures the OTLP exporter (traces + metrics).",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "The OTLP collector endpoint (an http/https URL with a host). Omit to disable OTLP export."
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["http/protobuf", "grpc"],
+          "description": "OTLP wire protocol. Defaults to \"http/protobuf\"."
+        },
+        "headers": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Custom headers sent with every OTLP export request (e.g. authentication)."
+        },
+        "insecure": {
+          "type": "boolean",
+          "description": "Disable OTLP transport TLS. Defaults to false."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Export timeout, a Go duration string."
+        }
+      }
+    },
+    "telemetryServiceConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "description": "Sets the OpenTelemetry resource service.name/service.version attributes.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The OpenTelemetry service.name resource attribute. Required."
+        },
+        "version": {
+          "type": "string",
+          "description": "The OpenTelemetry service.version resource attribute."
+        }
+      }
+    },
+    "telemetrySamplingConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The head, parent-based trace sampling ratio.",
+      "properties": {
+        "ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Fraction of traces sampled, 0.0-1.0. Defaults to 1.0 (sample everything)."
+        }
+      }
+    },
+    "telemetryAccessLogConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The access-log field configuration.",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "description": "Level the access-log line is emitted at. Defaults to \"info\"."
+        },
+        "properties": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "method", "path", "route", "query", "status", "duration_ms",
+              "bytes_out", "client_ip", "host", "protocol", "user_id",
+              "session_id", "request_id", "trace_id", "span_id"
+            ]
+          },
+          "description": "Which fields to include on each access-log line. An explicit list fully replaces the default set (no merge). Defaults to [method, path, status, duration_ms, client_ip, request_id, trace_id, span_id]."
+        },
+        "headers": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Custom field name -> request header name to capture onto the access-log line. Header names authorization, cookie, proxy-authorization, and set-cookie (case-insensitive) are rejected to prevent credential leakage."
+        },
+        "fields": {
+          "$ref": "#/$defs/stringMap",
+          "description": "Static custom fields added to every access-log line (field name -> value; ${VAR} is resolved at config load time)."
+        }
+      }
+    },
+    "telemetrySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service"],
+      "description": "kind: Telemetry spec — OpenTelemetry export + access-log settings. At most one Telemetry resource is allowed per config.",
+      "properties": {
+        "logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "description": "The application's slog level. Defaults to \"info\"."
+        },
+        "otlp": { "$ref": "#/$defs/telemetryOTLPConfig" },
+        "service": { "$ref": "#/$defs/telemetryServiceConfig" },
+        "sampling": { "$ref": "#/$defs/telemetrySamplingConfig" },
+        "accessLog": { "$ref": "#/$defs/telemetryAccessLogConfig" }
+      }
+    },
+
+    "policyRequire": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The built-in (Tier A) group/claim rule. Must not be empty if present: at least one group or claim entry is required.",
+      "properties": {
+        "groups": {
+          "$ref": "#/$defs/stringArray",
+          "description": "Any-of: the principal must belong to at least one listed group."
+        },
+        "claims": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "array", "items": { "type": "string" } }
+            ]
+          },
+          "description": "All-of across keys; each value is a scalar or list of acceptable values (any-of within that claim)."
+        }
+      }
+    },
+    "policyRego": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "description": "Embedded OPA/Rego rule (Tier B), an alternative (or addition) to `require`.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File or directory of .rego source, resolved relative to where the config is loaded from. Must define `deny` under `package hog.authz`. Required."
+        }
+      }
+    },
+    "policySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "kind: Policy spec — referenced from access.authorize on a Route or RouteGroup. A policy is satisfied iff require passes (when present) AND the rego evaluation produces no deny (when present). At least one of require/rego is required.",
+      "properties": {
+        "require": { "$ref": "#/$defs/policyRequire" },
+        "rego": { "$ref": "#/$defs/policyRego" }
+      }
+    }
+  }
+}
