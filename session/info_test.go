@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 )
 
 func TestInfoHandler(t *testing.T) {

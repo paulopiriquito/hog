@@ -10,11 +10,11 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/gateway"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/gateway"
 )
 
-const hogModule = "github.com/paulopiriquito/hog"
+const hogModule = "github.com/paulopiriquito/hog/v2"
 
 // Plugin is one manifest entry: a package import path + optional module version.
 type Plugin struct {

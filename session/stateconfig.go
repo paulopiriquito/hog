@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 	"gopkg.in/yaml.v3"
 )
 

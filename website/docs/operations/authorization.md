@@ -145,6 +145,35 @@ spec:
     authorize: [gold-tier, no-weekend-deletes]
 ```
 
+### Redirecting a denial instead of answering 403
+
+An **app** route can send a denied request to a same-origin page instead of
+the plain 403, for a nicer in-browser landing than a bare error body:
+
+```yaml
+kind: Route
+metadata: { name: admin-panel, labels: { tier: app } }
+spec:
+  match: /admin/
+  handler: { type: static, dir: /srv/admin }
+  access:
+    auth: required
+    authorize: [admins-only]
+    onDeny:
+      redirect: /no-access
+```
+
+`onDeny.redirect` must be a same-origin path — validated when the config is
+loaded, the same way `return_to` is — and only takes effect on `app` routes;
+a `service` route keeps the 403 regardless of `onDeny`, so an API client
+never has to follow a login-shaped detour. The redirect is a `302 Found`,
+which is meant for a browser navigation: it fires for any request method,
+and a client that replays a `302` as a plain `GET` (rather than re-rendering
+the page as a browser would) drops the original request's body — one more
+reason a service route always keeps the 403 instead. The deny is still
+logged and recorded as the `authz.deny` span event exactly as it is without
+a redirect configured; only the response changes.
+
 See [troubleshooting](troubleshooting.md#403-forbidden-from-a-policy) for
 diagnosing an unexpected `403`, and
 [observability](observability.md) for how the deny reason surfaces in

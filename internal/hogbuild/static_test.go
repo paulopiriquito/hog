@@ -5,8 +5,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/paulopiriquito/hog/app"
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/app"
+	"github.com/paulopiriquito/hog/v2/config"
 )
 
 // TestBakedStaticConfigParses guards the baked hog-static config (embedded in

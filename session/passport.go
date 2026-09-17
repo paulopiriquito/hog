@@ -1,6 +1,10 @@
 package session
 
-import "strings"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
 
 // projectPassport copies allowlisted claims, preferring userinfo over id_token.
 // Absent claims are skipped. sub is handled separately by the caller.
@@ -45,6 +49,7 @@ func projectGroups(cfg *GroupsConfig, userinfo, idClaims map[string]any) []strin
 		if cfg.Render == "cn" {
 			v = extractCN(dn)
 		}
+		v = stripPrefixes(v, cfg.Strip)
 		if v != "" && !seen[v] {
 			seen[v] = true
 			out = append(out, v)
@@ -72,6 +77,60 @@ func extractCN(dn string) string {
 		}
 	}
 	return ""
+}
+
+// stripPrefixes removes the first configured prefix that v starts with
+// (case-insensitive); an empty list is a no-op.
+func stripPrefixes(v string, prefixes []string) string {
+	if len(prefixes) == 0 {
+		return v
+	}
+	for _, p := range prefixes {
+		if p == "" {
+			continue
+		}
+		if n, ok := foldPrefixLen(v, p); ok {
+			return v[n:]
+		}
+	}
+	return v
+}
+
+// foldPrefixLen reports how many bytes of v are matched by the prefix p under
+// case-insensitive comparison. The two byte lengths can differ — case folding is
+// not length-preserving in Unicode — so both are walked rune by rune instead of
+// slicing v at len(p), which would cut inside a rune.
+func foldPrefixLen(v, p string) (int, bool) {
+	i, j := 0, 0
+	for j < len(p) {
+		if i >= len(v) {
+			return 0, false
+		}
+		rv, nv := utf8.DecodeRuneInString(v[i:])
+		rp, np := utf8.DecodeRuneInString(p[j:])
+		if unicode.ToLower(rv) != unicode.ToLower(rp) {
+			return 0, false
+		}
+		i += nv
+		j += np
+	}
+	return i, true
+}
+
+// resolveSubject picks the principal's subject: the configured claim (userinfo
+// first, then the token), or fallback (the token's own sub) when the claim is
+// "sub", empty, absent or not a string — a subject is never silently emptied.
+func resolveSubject(claim, fallback string, idClaims, userinfo map[string]any) string {
+	if claim == "" || claim == "sub" {
+		return fallback
+	}
+	if v, ok := userinfo[claim].(string); ok && v != "" {
+		return v
+	}
+	if v, ok := idClaims[claim].(string); ok && v != "" {
+		return v
+	}
+	return fallback
 }
 
 // toStringSlice coerces a userinfo claim value to []string ([]any or []string).

@@ -91,6 +91,17 @@ header is always stripped before HOG decides whether to inject its own,
 regardless of these flags, so a client can never smuggle a bearer token
 straight through to a backend.
 
+The identity assertion header (`X-Hog-Identity` by default,
+[handing identity to a second HOG instance](authentication.md#handing-identity-to-a-second-hog-instance))
+follows the same rule: it is stripped from every inbound request before
+anything reads it, on both the issuing and the accepting instance, and set
+only by HOG itself, only on the outbound hop of a route with
+`forwardIdentity: true` — a client can never supply one directly. On the
+accepting side, a valid assertion by default (`requireBearer: true`) only
+*enriches* the principal a verified Bearer token already authenticated, so a
+leaked or forged header alone authenticates nobody unless an operator has
+explicitly opted into `requireBearer: false`.
+
 ## Authorization is fail-closed
 
 - A route with an empty `access.authorize` skips the authorization gate

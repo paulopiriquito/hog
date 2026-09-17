@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 func TestAccessLogEmitsConfiguredFields(t *testing.T) {

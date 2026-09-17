@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/config"
 )
 
 func TestFullConfigExampleParses(t *testing.T) {

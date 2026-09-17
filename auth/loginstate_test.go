@@ -3,7 +3,7 @@ package auth
 import (
 	"testing"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 const key32 = "0123456789abcdef0123456789abcdef"

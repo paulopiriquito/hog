@@ -16,6 +16,7 @@ type GroupsConfig struct {
 	Match  []string // keep DNs containing ANY of these (case-insensitive substring)
 	Render string   // "cn" (extract cn= value) or "dn" (whole DN)
 	As     string   // session field name for the rendered list (public view)
+	Strip  []string // case-insensitive prefixes removed from each rendered value (first match wins)
 }
 
 // Config is the validated session configuration.
@@ -28,6 +29,7 @@ type Config struct {
 	Groups             *GroupsConfig // nil when unconfigured
 	InfoPath           string
 	PostLogoutRedirect string
+	SubjectClaim       string // claim that becomes the session subject ("sub" = the token's own subject)
 }
 
 // rawConfig mirrors the YAML; pointers distinguish "omitted" from "explicit empty".

@@ -27,9 +27,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/paulopiriquito/hog"
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/v2"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
 )
 
 // helloConfig is this handler's own `spec.handler` fields.

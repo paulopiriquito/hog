@@ -20,6 +20,8 @@ jobs:
       - run: make fmt vet
       - run: go mod tidy && git diff --exit-code go.mod go.sum
       - run: make test race
+      - run: cd plugins/statestore-valkey && go mod tidy && git diff --exit-code go.mod go.sum
+      - run: make plugins-test
   e2e:
     runs-on: ubuntu-latest
     steps:

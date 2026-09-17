@@ -6,8 +6,8 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
 )
 
 // Register adds the built-in terminal handlers to reg.

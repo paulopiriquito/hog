@@ -1,7 +1,7 @@
 # HOG
 
-[![tests](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml)
-[![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/releases)
+[![tests](https://github.com/paulopiriquito/hog/v2/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/v2/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/v2/releases)
 [![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
@@ -24,9 +24,14 @@ plane.
 
 - **Serves your frontend** — a traversal-safe static file server with single-page-app fallback.
 - **Terminates the session** — OpenID Connect login (PKCE) into an encrypted, fingerprinted cookie
-  that never reaches your backends; API clients use a bearer token.
+  that never reaches your backends; API clients use a bearer token, with the subject resolvable
+  from any claim, not just `sub`.
 - **Bridges to your backends** — reverse-proxy a route to one upstream, or aggregate several; the
   authenticated identity is injected as `X-User-*` headers (access token forwarded only when opted in).
+- **Hands identity to a second HOG instance** — a signed, short-lived assertion carries a resolved
+  principal across a proxied hop, so a downstream instance can trust it without re-resolving it.
+- **Keeps sessions server-side, optionally** — a shipped Valkey-backed store (`plugins/statestore-valkey`)
+  unlocks silent token refresh without writing your own.
 - **Enforces authorization** — a single `access` block with built-in group/claim rules plus embedded
   OPA/Rego policies (`kind: Policy`); additive, deny-overrides, fail-closed.
 - **Is observable** — opt-in OpenTelemetry traces & metrics over OTLP, W3C propagation, and a
@@ -104,7 +109,7 @@ Requires Go 1.26. `make e2e` requires Docker (or Podman).
 
 ## Extending HOG
 
-- **Framework:** `import "github.com/paulopiriquito/hog"`, blank-import your plugin packages, call
+- **Framework:** `import "github.com/paulopiriquito/hog/v2"`, blank-import your plugin packages, call
   `hog.Main()`.
 - **Plugins:** write a Go package that registers a module in its `init()`, declare it in the
   `Gateway.plugins` manifest, and compose a binary with `hog-build`.

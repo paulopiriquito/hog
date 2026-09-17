@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/session"
 	"go.opentelemetry.io/otel/trace"
 )
 

@@ -49,7 +49,7 @@ Both ways of shipping a HOG binary reduce to the same thing: import the
 built-ins, blank-import your plugin packages so their `init()`s register, and
 `go build`.
 
-**Framework mode.** `import "github.com/paulopiriquito/hog"`, blank-import
+**Framework mode.** `import "github.com/paulopiriquito/hog/v2"`, blank-import
 your plugin packages, and call `hog.Main()` (or drive `hog.Run` yourself).
 You own `main.go` and `go.mod` directly — this is how you'd embed HOG inside
 a larger Go program.

@@ -10,8 +10,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
 )
 
 // cleanRequestPath strips the optional prefix and returns a slash-free fs path

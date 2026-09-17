@@ -1,8 +1,15 @@
 package session
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"fmt"
+	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/paulopiriquito/hog/v2/idp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -142,5 +149,231 @@ func TestNeedUserInfoForToken(t *testing.T) {
 		if got := NeedUserInfoForToken(c.cfg, c.claims); got != c.want {
 			t.Errorf("%s: NeedUserInfoForToken = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestParseIdentitySubjectClaimDefaultsToSub(t *testing.T) {
+	cfg, err := ParseIdentity(yaml.Node{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubjectClaim != "sub" {
+		t.Fatalf("default subjectClaim = %q, want sub", cfg.SubjectClaim)
+	}
+	cfg, err = ParseIdentity(idNode(t, "subjectClaim: uid\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.SubjectClaim != "uid" {
+		t.Fatalf("subjectClaim = %q", cfg.SubjectClaim)
+	}
+}
+
+func TestNewPrincipalUsesConfiguredSubjectClaim(t *testing.T) {
+	idCfg := IdentityConfig{Claims: []string{"email"}, SubjectClaim: "uid"}
+	p := NewPrincipal("", map[string]any{"uid": "u-10427", "email": "p@example.com"}, nil, "at", idCfg)
+	if p.Subject != "u-10427" {
+		t.Fatalf("subject = %q, want the uid claim", p.Subject)
+	}
+	// userinfo wins over the token, like every other claim
+	p = NewPrincipal("", map[string]any{"uid": "token"}, map[string]any{"uid": "userinfo"}, "at", idCfg)
+	if p.Subject != "userinfo" {
+		t.Fatalf("subject = %q, want the userinfo value", p.Subject)
+	}
+	// claim absent ⇒ fall back to the token subject (never silently empty)
+	p = NewPrincipal("sub-1", map[string]any{"email": "p@x.co"}, nil, "at", idCfg)
+	if p.Subject != "sub-1" {
+		t.Fatalf("subject = %q, want the sub fallback", p.Subject)
+	}
+}
+
+func TestNeedUserInfoForTokenWhenSubjectClaimMissing(t *testing.T) {
+	idCfg := IdentityConfig{Claims: []string{}, SubjectClaim: "uid", UserInfo: "auto"}
+	if !NeedUserInfoForToken(idCfg, map[string]any{"sub": "x"}) {
+		t.Fatal("a token without the subject claim must trigger userinfo")
+	}
+	if NeedUserInfoForToken(idCfg, map[string]any{"uid": "u-10427"}) {
+		t.Fatal("a token carrying the subject claim needs no userinfo")
+	}
+	if !NeedUserInfoForToken(idCfg, map[string]any{"uid": ""}) {
+		t.Fatal("an empty-string subject claim is as good as absent and must trigger userinfo")
+	}
+	if !NeedUserInfoForToken(idCfg, map[string]any{"uid": 42}) {
+		t.Fatal("a non-string subject claim is as good as absent and must trigger userinfo")
+	}
+}
+
+func TestMakeSessionUsesConfiguredSubjectClaim(t *testing.T) {
+	cfg := Config{SubjectClaim: "uid", TTL: time.Hour}
+	idt := &idp.Identity{Subject: "sub-1", Claims: map[string]any{"uid": "u-10427"}}
+	req := httptest.NewRequest("GET", "/", nil)
+	s := makeSession(cfg, idt, nil, &idp.Tokens{AccessToken: "at"}, req)
+	if s.Subject != "u-10427" {
+		t.Fatalf("session subject = %q", s.Subject)
+	}
+}
+
+func TestParseIdentityAssertionFullBlock(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	cfg, err := ParseIdentity(idNode(t, fmt.Sprintf(`
+assertion:
+  issue:
+    name: go-app
+    keyId: k1
+    key: %s
+  accept:
+    issuer: go-app
+    keys:
+      - keyId: k1
+        publicKey: %s
+`, seedB64, pubB64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Assertion == nil || cfg.Assertion.Issue == nil || cfg.Assertion.Accept == nil {
+		t.Fatalf("assertion = %+v", cfg.Assertion)
+	}
+	if cfg.Assertion.Issue.TTL != 60*time.Second {
+		t.Fatalf("issue.TTL = %v, want 60s default", cfg.Assertion.Issue.TTL)
+	}
+	if cfg.Assertion.Issue.Header != "X-Hog-Identity" {
+		t.Fatalf("issue.Header = %q", cfg.Assertion.Issue.Header)
+	}
+	if cfg.Assertion.Accept.Header != "X-Hog-Identity" {
+		t.Fatalf("accept.Header = %q", cfg.Assertion.Accept.Header)
+	}
+	if !cfg.Assertion.Accept.RequireBearer {
+		t.Fatal("requireBearer should default true")
+	}
+	if len(cfg.Assertion.Issue.Seed) != ed25519.SeedSize {
+		t.Fatalf("issue.Seed length = %d, want %d", len(cfg.Assertion.Issue.Seed), ed25519.SeedSize)
+	}
+	if got := cfg.Assertion.Accept.Keys["k1"]; len(got) != ed25519.PublicKeySize {
+		t.Fatalf("accept.Keys[k1] length = %d, want %d", len(got), ed25519.PublicKeySize)
+	}
+}
+
+func TestParseIdentityAssertionRejectsShortSeed(t *testing.T) {
+	bad := base64.StdEncoding.EncodeToString(make([]byte, 16))
+	_, err := ParseIdentity(idNode(t, fmt.Sprintf(`
+assertion:
+  issue:
+    name: go-app
+    keyId: k1
+    key: %s
+`, bad)))
+	if err == nil {
+		t.Fatal("want error for a 16-byte seed")
+	}
+}
+
+func TestParseIdentityAssertionRejectsShortPublicKey(t *testing.T) {
+	bad := base64.StdEncoding.EncodeToString(make([]byte, 16))
+	_, err := ParseIdentity(idNode(t, fmt.Sprintf(`
+assertion:
+  accept:
+    issuer: go-app
+    keys:
+      - keyId: k1
+        publicKey: %s
+`, bad)))
+	if err == nil {
+		t.Fatal("want error for a 16-byte public key")
+	}
+}
+
+func TestParseIdentityAssertionRejectsAcceptWithNoKeys(t *testing.T) {
+	_, err := ParseIdentity(idNode(t, "assertion:\n  accept:\n    issuer: go-app\n"))
+	if err == nil {
+		t.Fatal("want error for accept with no keys")
+	}
+}
+
+func TestParseIdentityAssertionRejectsIssueWithoutName(t *testing.T) {
+	seed := base64.StdEncoding.EncodeToString(make([]byte, ed25519.SeedSize))
+	_, err := ParseIdentity(idNode(t, fmt.Sprintf("assertion:\n  issue:\n    keyId: k1\n    key: %s\n", seed)))
+	if err == nil {
+		t.Fatal("want error for issue without name")
+	}
+}
+
+func TestParseIdentityAssertionRejectsDuplicateKids(t *testing.T) {
+	pub := base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	_, err := ParseIdentity(idNode(t, fmt.Sprintf(`
+assertion:
+  accept:
+    issuer: go-app
+    keys:
+      - keyId: k1
+        publicKey: %s
+      - keyId: k1
+        publicKey: %s
+`, pub, pub)))
+	if err == nil {
+		t.Fatal("want error for duplicate kids")
+	}
+}
+
+func TestParseIdentityAssertionRejectsEmptyBlock(t *testing.T) {
+	_, err := ParseIdentity(idNode(t, "assertion: {}\n"))
+	if err == nil {
+		t.Fatal("want error for an assertion block with neither issue nor accept")
+	}
+}
+
+func TestParseIdentityAssertionHonoursExplicitOverrides(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+	pubB64 := base64.StdEncoding.EncodeToString(pub)
+
+	cfg, err := ParseIdentity(idNode(t, fmt.Sprintf(`
+assertion:
+  issue:
+    name: go-app
+    keyId: k1
+    key: %s
+    ttl: 5s
+    header: X-Other
+  accept:
+    issuer: go-app
+    header: X-Other
+    requireBearer: false
+    keys:
+      - keyId: k1
+        publicKey: %s
+`, seedB64, pubB64)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Assertion.Issue.TTL != 5*time.Second {
+		t.Fatalf("issue.TTL = %v, want 5s", cfg.Assertion.Issue.TTL)
+	}
+	if cfg.Assertion.Issue.Header != "X-Other" {
+		t.Fatalf("issue.Header = %q, want X-Other", cfg.Assertion.Issue.Header)
+	}
+	if cfg.Assertion.Accept.Header != "X-Other" {
+		t.Fatalf("accept.Header = %q, want X-Other", cfg.Assertion.Accept.Header)
+	}
+	if cfg.Assertion.Accept.RequireBearer {
+		t.Fatal("requireBearer should be false when explicitly set")
+	}
+}
+
+func TestParseIdentityGroupsStrip(t *testing.T) {
+	cfg, err := ParseIdentity(idNode(t, "groups:\n  source: memberof\n  match: [\"ou=myapp\"]\n  strip: [\"APP-ROLE-myapp-\"]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Groups.Strip) != 1 || cfg.Groups.Strip[0] != "APP-ROLE-myapp-" {
+		t.Fatalf("strip = %v", cfg.Groups.Strip)
 	}
 }

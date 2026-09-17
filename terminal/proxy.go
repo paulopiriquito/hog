@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/telemetry"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/telemetry"
 )
 
 // proxyConfig is the decoded handler config for `type: reverse-proxy`.
@@ -23,6 +23,7 @@ type proxyConfig struct {
 	PreserveHost       bool   `yaml:"preserveHost"`
 	ForwardAccessToken bool   `yaml:"forwardAccessToken"`
 	ForwardCookies     bool   `yaml:"forwardCookies"`
+	ForwardIdentity    bool   `yaml:"forwardIdentity"`
 	Timeout            string `yaml:"timeout"`
 	InsecureSkipVerify bool   `yaml:"insecureSkipVerify"`
 }
@@ -51,7 +52,11 @@ func registerProxy(reg *registry.Registry) {
 		if pc.InsecureSkipVerify {
 			transport = telemetry.InstrumentedTransport(insecureTransport())
 		}
-		opts := forwardOptions{forwardAccessToken: pc.ForwardAccessToken, forwardCookies: pc.ForwardCookies}
+		opts := forwardOptions{
+			forwardAccessToken: pc.ForwardAccessToken,
+			forwardCookies:     pc.ForwardCookies,
+			forwardIdentity:    pc.ForwardIdentity,
+		}
 		rp := &httputil.ReverseProxy{
 			Transport:     transport,
 			FlushInterval: -1, // immediate flush (SSE/streaming); websockets ride on ReverseProxy upgrade handling

@@ -4,24 +4,25 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
 
-	"github.com/paulopiriquito/hog/auth"
-	"github.com/paulopiriquito/hog/authz"
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/gateway"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/route"
-	"github.com/paulopiriquito/hog/security"
-	"github.com/paulopiriquito/hog/selector"
-	"github.com/paulopiriquito/hog/session"
-	"github.com/paulopiriquito/hog/telemetry"
+	"github.com/paulopiriquito/hog/v2/auth"
+	"github.com/paulopiriquito/hog/v2/authz"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/gateway"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/route"
+	"github.com/paulopiriquito/hog/v2/security"
+	"github.com/paulopiriquito/hog/v2/selector"
+	"github.com/paulopiriquito/hog/v2/session"
+	"github.com/paulopiriquito/hog/v2/telemetry"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"gopkg.in/yaml.v3"
 )
@@ -173,6 +174,26 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if active != nil {
 		bearerGate = auth.BearerGate(active, idCfg, logger)
 	}
+	// Identity assertion hand-off between HOG instances: accept (enrich a
+	// Bearer-authenticated principal, or — with requireBearer:false — authenticate
+	// on the assertion alone) and issue (mint one for a proxied backend hop).
+	var assertionGate, issueMW chain.Middleware
+	if idCfg.Assertion != nil && idCfg.Assertion.Accept != nil {
+		acc := idCfg.Assertion.Accept
+		keys := make(map[string]ed25519.PublicKey, len(acc.Keys))
+		for kid, k := range acc.Keys {
+			keys[kid] = ed25519.PublicKey(k)
+		}
+		assertionGate = auth.AssertionGate(auth.NewAssertionVerifier(acc.Issuer, keys), acc.Header, acc.RequireBearer, logger)
+	}
+	if idCfg.Assertion != nil && idCfg.Assertion.Issue != nil {
+		is := idCfg.Assertion.Issue
+		issuer, err := auth.NewAssertionIssuer(is.Name, is.KeyID, is.Seed, is.TTL)
+		if err != nil {
+			return nil, err
+		}
+		issueMW = auth.IssueAssertion(issuer, is.Header, logger)
+	}
 	groupsAs := "groups"
 	if idCfg.Groups != nil && idCfg.Groups.As != "" {
 		groupsAs = idCfg.Groups.As
@@ -232,12 +253,22 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		if rerr != nil {
 			return nil, rerr
 		}
-		authActive := sess != nil || active != nil
+		authActive := sess != nil || active != nil || assertionGate != nil
 		var gates chain.Gates
 		if authActive {
 			slot := sessionGate
-			if resolved.Type == "service" && bearerGate != nil {
-				slot = combine(sessionGate, bearerGate) // cookie (outer) then bearer (inner)
+			if resolved.Type == "service" {
+				switch {
+				case bearerGate != nil && assertionGate != nil:
+					// cookie (outer) → bearer → assertion (inner): the assertion only
+					// enriches the principal the Bearer gate already authenticated.
+					slot = combine(sessionGate, combine(bearerGate, assertionGate))
+				case bearerGate != nil:
+					slot = combine(sessionGate, bearerGate) // cookie (outer) then bearer (inner)
+				case assertionGate != nil:
+					// No IdP configured: the peer's identity assertion is the sole credential.
+					slot = combine(sessionGate, assertionGate)
+				}
 			}
 			gates = chain.Gates{
 				Session:    slot,
@@ -259,12 +290,27 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 				}
 				pols = append(pols, pol)
 			}
-			gates.Authz = authz.Gate(pols, rt.Name, rt.Labels, logger)
+			denyRedirect := ""
+			if resolved.OnDeny != nil && resolved.Type == "app" {
+				denyRedirect = resolved.OnDeny.Redirect
+			}
+			gates.Authz = authz.Gate(pols, rt.Name, rt.Labels, denyRedirect, logger)
 		}
 		obs := chain.Observability{AccessLog: accessLog}
 		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates, obs)...)
 		mws = append(mws, reqMW...)
 		mws = append(mws, respMW...)
+		if issueMW != nil {
+			forwards, err := handlerForwardsIdentity(rt.Handler.Config)
+			if err != nil {
+				return nil, fmt.Errorf("route %q: forwardIdentity: %w", rt.Name, err)
+			}
+			if forwards {
+				// Runs closest to the terminal handler: it mints from the principal
+				// the gates above resolved, right before the request leaves for the backend.
+				mws = append(mws, issueMW)
+			}
+		}
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}
 	if active != nil && sess != nil {
@@ -350,6 +396,7 @@ func buildSession(g gateway.Settings, idCfg session.IdentityConfig, reg *registr
 	}
 	cfg.PassportClaims = idCfg.Claims
 	cfg.Groups = idCfg.Groups
+	cfg.SubjectClaim = idCfg.SubjectClaim
 
 	if g.StateProvider.Kind != 0 {
 		spc, err := session.ParseStateProvider(g.StateProvider)
@@ -407,6 +454,33 @@ func buildIdP(resources []config.Resource, reg *registry.Registry) (idp.IdP, err
 	default:
 		return nil, fmt.Errorf("config has %d IdP resources; exactly one is supported for now", len(resources))
 	}
+}
+
+// handlerForwardsIdentity reads the terminal handler's forwardIdentity flag so an
+// assertion is minted only for routes that hand identity to a peer HOG instance.
+// True when either the top-level flag (reverse-proxy) is set, or any entry of
+// the api-handler's backends list (terminal/aggregate.go backendConfig) sets its
+// own — a per-backend forwardIdentity: true otherwise had no effect end to end,
+// since only the reverse-proxy path was ever checked here.
+func handlerForwardsIdentity(node yaml.Node) (bool, error) {
+	var h struct {
+		ForwardIdentity bool `yaml:"forwardIdentity"`
+		Backends        []struct {
+			ForwardIdentity bool `yaml:"forwardIdentity"`
+		} `yaml:"backends"`
+	}
+	if err := node.Decode(&h); err != nil {
+		return false, err
+	}
+	if h.ForwardIdentity {
+		return true, nil
+	}
+	for _, b := range h.Backends {
+		if b.ForwardIdentity {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func buildTerminal(rt route.Route, reg *registry.Registry) (http.Handler, error) {

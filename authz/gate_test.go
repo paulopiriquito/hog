@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/session"
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -38,7 +38,7 @@ func serve(t *testing.T, g interface {
 }
 
 func TestGateDefaultAllowNoPolicies(t *testing.T) {
-	if code := serve(t, Gate(nil, "r", nil, nil), nil); code != 200 {
+	if code := serve(t, Gate(nil, "r", nil, "", nil), nil); code != 200 {
 		t.Fatalf("no policies ⇒ allow, got %d", code)
 	}
 }
@@ -50,7 +50,7 @@ func TestGateRequireDenyAndAllow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := Gate([]*Policy{pols["p"]}, "r", nil, nil)
+	g := Gate([]*Policy{pols["p"]}, "r", nil, "", nil)
 	if code := serve(t, g, &session.Principal{Subject: "u", Groups: []string{"users"}}); code != 403 {
 		t.Fatalf("missing group ⇒ 403, got %d", code)
 	}
@@ -61,7 +61,7 @@ func TestGateRequireDenyAndAllow(t *testing.T) {
 
 func TestGate403HasNoPolicyDetail(t *testing.T) {
 	pols, _ := Compile(context.Background(), []config.Resource{policyResource(t, "  require: { groups: [x] }\n")})
-	h := Gate([]*Policy{pols["p"]}, "r", nil, nil).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	h := Gate([]*Policy{pols["p"]}, "r", nil, "", nil).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://h/x", nil))
 	if rec.Code != 403 {
@@ -86,7 +86,7 @@ func TestGateConcurrentEval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := Gate([]*Policy{pols["p"]}, "r", nil, nil)
+	g := Gate([]*Policy{pols["p"]}, "r", nil, "", nil)
 	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 	var wg sync.WaitGroup
 	for i := 0; i < 50; i++ {
@@ -116,7 +116,7 @@ func TestGateAnonymousRegoDenyFiresFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := Gate([]*Policy{pols["p"]}, "r", nil, nil)
+	g := Gate([]*Policy{pols["p"]}, "r", nil, "", nil)
 
 	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 
@@ -155,7 +155,7 @@ func TestGateDenyOverridesAcrossPolicies(t *testing.T) {
 	}
 	polB := polsB["b"]
 
-	g := Gate([]*Policy{polA, polB}, "r", nil, nil)
+	g := Gate([]*Policy{polA, polB}, "r", nil, "", nil)
 	code := serve(t, g, &session.Principal{Subject: "u", Groups: []string{"users"}})
 	if code != http.StatusForbidden {
 		t.Fatalf("policy B unsatisfied ⇒ 403 despite policy A allowing, got %d", code)
@@ -172,7 +172,7 @@ func TestGateRegoDenyThroughHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := Gate([]*Policy{pols["p"]}, "r", nil, nil)
+	g := Gate([]*Policy{pols["p"]}, "r", nil, "", nil)
 	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 
 	req := httptest.NewRequest("DELETE", "http://h/x", nil)
@@ -199,7 +199,7 @@ func TestGateDenyRecordsSpanEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := Gate([]*Policy{pols["p"]}, "r", nil, nil)
+	g := Gate([]*Policy{pols["p"]}, "r", nil, "", nil)
 	h := g.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
 
 	ctx, span := otel.Tracer("authz_test").Start(context.Background(), "test-request-span")
@@ -236,6 +236,73 @@ func TestGateDenyRecordsSpanEvent(t *testing.T) {
 	}
 	if denyEvent == nil {
 		t.Fatalf("expected an authz.deny span event, got events: %v", events)
+	}
+}
+
+// TestGateDenyRedirectsWhenConfigured asserts a denial answers a same-origin
+// redirect when denyRedirect is configured, and keeps the existing 403 when
+// it is not (default behaviour unchanged). The redirect must leak no more
+// policy detail than the 403 does (TestGate403HasNoPolicyDetail is the model).
+func TestGateDenyRedirectsWhenConfigured(t *testing.T) {
+	pols, err := Compile(context.Background(), []config.Resource{
+		policyResource(t, "  require: { groups: [admins] }\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("denied request must not reach the handler") })
+	principal := &session.Principal{Subject: "u", Groups: []string{"viewers"}}
+
+	h := Gate([]*Policy{pols["p"]}, "app", nil, "/no-access", nil).Wrap(next)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "http://h/admin", nil)
+	req = req.WithContext(session.WithPrincipal(req.Context(), principal))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/no-access" {
+		t.Fatalf("code=%d location=%q; want 302 to the overview", rec.Code, rec.Header().Get("Location"))
+	}
+	if b := rec.Body.String(); containsAny(b, "admins", "group", "require") {
+		t.Fatalf("redirect body leaked policy detail: %q", b)
+	}
+
+	h = Gate([]*Policy{pols["p"]}, "app", nil, "", nil).Wrap(next)
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("GET", "http://h/admin", nil)
+	req = req.WithContext(session.WithPrincipal(req.Context(), principal))
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("code=%d; want 403 when no redirect is configured", rec.Code)
+	}
+}
+
+// TestGateDenyRedirectNotAppliedOnEvalError is the D2 regression: Gate must
+// redirect only when the policy decision carries no evaluation error. A rego
+// policy whose `deny` rule evaluates to a non-set value (mirrors
+// TestEngineBooleanDenyFailsClosed) fails at Eval time; paired with a
+// configured denyRedirect, the response must still be a plain 403 with no
+// Location header, never the redirect.
+func TestGateDenyRedirectNotAppliedOnEvalError(t *testing.T) {
+	const booleanDeny = `package hog.authz
+
+deny := true
+`
+	dir := writeRego(t, booleanDeny)
+	pols, err := Compile(context.Background(), []config.Resource{
+		policyResource(t, "  rego: { path: "+dir+" }\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Fatal("denied request must not reach the handler") })
+	h := Gate([]*Policy{pols["p"]}, "app", nil, "/no-access", nil).Wrap(next)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "http://h/x", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("policy evaluation error ⇒ 403, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "" {
+		t.Fatalf("policy evaluation error must not redirect, got Location=%q", loc)
 	}
 }
 

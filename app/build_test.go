@@ -3,8 +3,10 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -18,12 +20,13 @@ import (
 	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/session"
-	"github.com/paulopiriquito/hog/terminal"
+	"github.com/paulopiriquito/hog/v2/auth"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/session"
+	"github.com/paulopiriquito/hog/v2/terminal"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
@@ -1955,5 +1958,299 @@ spec: { match: /open/, type: app, handler: { type: echo-user } }
 	}
 	if c := do("DELETE", "/open/"); c != 200 {
 		t.Fatalf("DELETE /open/ (no policies) ⇒ %d, want 200 (default-allow)", c)
+	}
+}
+
+// TestBuildIssuesAssertionOnlyWhenHandlerOptsIn proves the identity-assertion
+// issuing side end to end: a route whose handler sets forwardIdentity: true, on
+// a gateway configured with identity.assertion.issue, forwards a verifiable
+// X-Hog-Identity to the backend; a route without the flag does not.
+func TestBuildIssuesAssertionOnlyWhenHandlerOptsIn(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	var mu sync.Mutex
+	headers := map[string]string{} // backend-observed path -> X-Hog-Identity
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		headers[r.URL.Path] = r.Header.Get(auth.DefaultAssertionHeader)
+		mu.Unlock()
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+  identity:
+    assertion:
+      issue: { name: go-app, keyId: k1, key: "`+seedB64+`" }
+---
+kind: Route
+metadata: { name: yes }
+spec:
+  match: /svc-yes/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+`, forwardIdentity: true }
+---
+kind: Route
+metadata: { name: no }
+spec:
+  match: /svc-no/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+` }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	do := func(path string) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("User-Agent", "UA")
+		for _, c := range mintSessionCookie(t, testKey) {
+			req.AddCookie(c)
+		}
+		a.Handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s ⇒ %d, want 200 (body %q)", path, rec.Code, rec.Body.String())
+		}
+	}
+	do("/svc-yes/x")
+	do("/svc-no/x")
+
+	mu.Lock()
+	gotYes, gotNo := headers["/svc-yes/x"], headers["/svc-no/x"]
+	mu.Unlock()
+
+	if gotYes == "" {
+		t.Fatal("route with forwardIdentity: true must forward a minted assertion")
+	}
+	v := auth.NewAssertionVerifier("go-app", map[string]ed25519.PublicKey{"k1": pub})
+	claims, err := v.Verify(gotYes)
+	if err != nil {
+		t.Fatalf("forwarded assertion does not verify: %v", err)
+	}
+	if claims.Subject != "u-1" {
+		t.Fatalf("asserted subject = %q, want u-1", claims.Subject)
+	}
+	if gotNo != "" {
+		t.Fatalf("route without forwardIdentity must not forward an assertion, got %q", gotNo)
+	}
+}
+
+// TestBuildFailsOnUnparsableForwardIdentity proves a mistyped forwardIdentity
+// value fails the build like every other handler-config decode, rather than
+// silently becoming false. echo-user's own factory ignores its config node
+// entirely, so only handlerForwardsIdentity's own decode can catch this.
+func TestBuildFailsOnUnparsableForwardIdentity(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  identity:
+    assertion:
+      issue: { name: go-app, keyId: k1, key: "`+seedB64+`" }
+---
+kind: Route
+metadata: { name: bad }
+spec:
+  match: /bad/
+  type: service
+  handler: { type: echo-user, forwardIdentity: "not-a-bool" }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("want an error for a forwardIdentity value that is not a bool")
+	}
+}
+
+// TestBuildIssuesAssertionForAPIRouteWithForwardingBackend proves the
+// aggregation (api) handler is covered too: a per-backend forwardIdentity is
+// only checked on the reverse-proxy path unless the top-level flag OR any
+// backend's own flag also arms IssueAssertion for the route as a whole.
+func TestBuildIssuesAssertionForAPIRouteWithForwardingBackend(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	var mu sync.Mutex
+	headers := map[string]string{} // backend-observed path -> X-Hog-Identity
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		headers[r.URL.Path] = r.Header.Get(auth.DefaultAssertionHeader)
+		mu.Unlock()
+		io.WriteString(w, `{"v":1}`)
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+  identity:
+    assertion:
+      issue: { name: go-app, keyId: k1, key: "`+seedB64+`" }
+---
+kind: Route
+metadata: { name: dash }
+spec:
+  match: /dash/
+  type: service
+  handler:
+    type: api
+    backends:
+      - { group: fwd, upstream: `+backend.URL+`, path: /fwd, forwardIdentity: true }
+      - { group: nofwd, upstream: `+backend.URL+`, path: /nofwd }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/dash/", nil)
+	req.Header.Set("User-Agent", "UA")
+	for _, c := range mintSessionCookie(t, testKey) {
+		req.AddCookie(c)
+	}
+	a.Handler.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body %q", rec.Code, rec.Body.String())
+	}
+
+	mu.Lock()
+	gotFwd, gotNoFwd := headers["/fwd"], headers["/nofwd"]
+	mu.Unlock()
+
+	if gotFwd == "" {
+		t.Fatal("a backend with forwardIdentity: true must receive a minted assertion")
+	}
+	v := auth.NewAssertionVerifier("go-app", map[string]ed25519.PublicKey{"k1": pub})
+	if _, err := v.Verify(gotFwd); err != nil {
+		t.Fatalf("forwarded assertion does not verify: %v", err)
+	}
+	if gotNoFwd != "" {
+		t.Fatalf("a backend without forwardIdentity must not receive an assertion, got %q", gotNoFwd)
+	}
+}
+
+// TestBuildForwardsAssertionUnderConfiguredHeaderName proves the whole,
+// assembled app (not just prepareBackendRequest in isolation) honors a
+// non-default identity.assertion.issue.header end to end: forwarded under
+// that name when the route opts in, and absent — under both the configured
+// name and the default — when it does not.
+func TestBuildForwardsAssertionUnderConfiguredHeaderName(t *testing.T) {
+	const customHeader = "X-Custom-Identity"
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedB64 := base64.StdEncoding.EncodeToString(priv.Seed())
+
+	type observed struct{ custom, def string }
+	var mu sync.Mutex
+	headers := map[string]observed{}
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		headers[r.URL.Path] = observed{custom: r.Header.Get(customHeader), def: r.Header.Get(auth.DefaultAssertionHeader)}
+		mu.Unlock()
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(backend.Close)
+
+	reg := registry.New()
+	terminal.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session: { key: "`+testKey+`" }
+  identity:
+    assertion:
+      issue: { name: go-app, keyId: k1, key: "`+seedB64+`", header: `+customHeader+` }
+---
+kind: Route
+metadata: { name: yes }
+spec:
+  match: /svc-yes/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+`, forwardIdentity: true }
+---
+kind: Route
+metadata: { name: no }
+spec:
+  match: /svc-no/
+  type: service
+  handler: { type: reverse-proxy, upstream: `+backend.URL+` }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	do := func(path string) {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", path, nil)
+		req.Header.Set("User-Agent", "UA")
+		for _, c := range mintSessionCookie(t, testKey) {
+			req.AddCookie(c)
+		}
+		a.Handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatalf("%s ⇒ %d, want 200 (body %q)", path, rec.Code, rec.Body.String())
+		}
+	}
+	do("/svc-yes/x")
+	do("/svc-no/x")
+
+	mu.Lock()
+	gotYes, gotNo := headers["/svc-yes/x"], headers["/svc-no/x"]
+	mu.Unlock()
+
+	if gotYes.custom == "" {
+		t.Fatal("route with forwardIdentity: true must forward the assertion under the configured header name")
+	}
+	v := auth.NewAssertionVerifier("go-app", map[string]ed25519.PublicKey{"k1": pub})
+	if _, err := v.Verify(gotYes.custom); err != nil {
+		t.Fatalf("forwarded assertion does not verify: %v", err)
+	}
+	if gotYes.def != "" {
+		t.Fatalf("assertion must not also appear under the default header name, got %q", gotYes.def)
+	}
+	if gotNo.custom != "" || gotNo.def != "" {
+		t.Fatalf("route without forwardIdentity must not forward an assertion under either name, got %+v", gotNo)
 	}
 }

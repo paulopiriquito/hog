@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulopiriquito/hog/session"
-	"github.com/paulopiriquito/hog/telemetry"
+	"github.com/paulopiriquito/hog/v2/auth"
+	"github.com/paulopiriquito/hog/v2/session"
+	"github.com/paulopiriquito/hog/v2/telemetry"
 )
 
 // sharedTransport is the verifying, connection-pooled transport reused by every
@@ -41,6 +42,7 @@ func insecureTransport() *http.Transport {
 type forwardOptions struct {
 	forwardAccessToken bool // inject Authorization: Bearer from the session principal's access token
 	forwardCookies     bool // pass the inbound Cookie header through (default: strip)
+	forwardIdentity    bool // pass the inbound identity assertion header through (default: strip)
 }
 
 // prepareBackendRequest mutates the outbound backend request out using the inbound
@@ -69,6 +71,28 @@ func prepareBackendRequest(out, in *http.Request, opts forwardOptions) {
 	if opts.forwardAccessToken {
 		if p, ok := session.FromContext(in.Context()); ok && p.AccessToken != "" {
 			out.Header.Set("Authorization", "Bearer "+p.AccessToken)
+		}
+	}
+	// The identity assertion (minted by IssueAssertion on the inbound request) reaches
+	// the backend only when the route opts in; otherwise it is dropped like Authorization.
+	// IssueAssertion may have minted it under a configured, non-default header name
+	// (identity.assertion.issue.header) — this handler never sees that gateway
+	// config, only the per-route forwardIdentity flag, so the name it actually used
+	// is read back off the request context. Both the default name and the
+	// context-supplied one (when they differ) are stripped, so neither a stale
+	// default-named header nor a client-supplied one under the configured name can
+	// reach the backend.
+	assertionHeader := auth.DefaultAssertionHeader
+	if h := auth.AssertionHeaderFromContext(in.Context()); h != "" {
+		assertionHeader = h
+	}
+	out.Header.Del(auth.DefaultAssertionHeader)
+	if assertionHeader != auth.DefaultAssertionHeader {
+		out.Header.Del(assertionHeader)
+	}
+	if opts.forwardIdentity {
+		if v := in.Header.Get(assertionHeader); v != "" {
+			out.Header.Set(assertionHeader, v)
 		}
 	}
 	setXForwarded(out, in)

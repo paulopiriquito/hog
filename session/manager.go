@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 )
 
 // Sentinel errors from Read.
@@ -46,7 +46,7 @@ func NewManager(cfg Config) (Manager, error) {
 func makeSession(cfg Config, idt *idp.Identity, userinfo map[string]any, tok *idp.Tokens, r *http.Request) Session {
 	now := time.Now()
 	return Session{
-		Subject:     idt.Subject,
+		Subject:     resolveSubject(cfg.SubjectClaim, idt.Subject, idt.Claims, userinfo),
 		Passport:    projectPassport(cfg.PassportClaims, idt.Claims, userinfo),
 		Groups:      projectGroups(cfg.Groups, userinfo, idt.Claims),
 		AccessToken: tok.AccessToken, // refresh token intentionally NOT stored in the cookie

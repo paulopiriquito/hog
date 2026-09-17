@@ -5,7 +5,7 @@ REGISTRY ?= ghcr.io/paulopiriquito
 TAG     ?= dev
 COMPOSE  = $(DOCKER) compose -f tests/e2e/docker-compose.yaml
 
-.PHONY: build test race vet fmt tidy vuln ci all images e2e e2e-up e2e-down docs docs-serve clean
+.PHONY: build test race vet fmt tidy vuln ci all images e2e e2e-up e2e-down docs docs-serve clean plugins-test
 
 build: ## build the binaries (emitted at the repo root; gitignored)
 	$(GO) build -o hog ./cmd/hog
@@ -29,6 +29,9 @@ tidy:
 
 vuln: ## known-vulnerability scan
 	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+plugins-test: ## vet + test the nested plugin modules (not part of the root module)
+	cd plugins/statestore-valkey && $(GO) vet ./... && $(GO) test ./...
 
 ci: fmt vet test race ## the unit gate CI runs
 

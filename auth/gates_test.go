@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // principalProbe is a terminal that records whether a principal is in ctx.

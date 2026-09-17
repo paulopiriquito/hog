@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/telemetry"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/telemetry"
 )
 
 // maxBackendBytes caps a single backend response read (memory bound).
@@ -35,6 +35,7 @@ type backendConfig struct {
 	Required           *bool  `yaml:"required"`
 	ForwardQuery       bool   `yaml:"forwardQuery"`
 	ForwardAccessToken bool   `yaml:"forwardAccessToken"`
+	ForwardIdentity    bool   `yaml:"forwardIdentity"`
 }
 
 // backend is a validated aggregation target.
@@ -97,7 +98,7 @@ func registerAPI(reg *registry.Registry) {
 			backends = append(backends, backend{
 				group: b.Group, base: base, path: b.Path, method: method,
 				required: required, forwardQuery: b.ForwardQuery,
-				opts: forwardOptions{forwardAccessToken: b.ForwardAccessToken},
+				opts: forwardOptions{forwardAccessToken: b.ForwardAccessToken, forwardIdentity: b.ForwardIdentity},
 			})
 		}
 		return &apiHandler{backends: backends, timeout: timeout}, nil

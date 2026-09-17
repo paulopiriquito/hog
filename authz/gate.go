@@ -4,17 +4,21 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/session"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
 
 // Gate builds the authz middleware for a route: every policy in the effective
-// set must be satisfied, else 403. An empty set is a pass-through (default-allow).
-// The 403 body carries no policy detail; the reason is logged + recorded on the
-// request span. routeName/labels are baked in for the policy input.
-func Gate(policies []*Policy, routeName string, labels map[string]string, logger *slog.Logger) chain.Middleware {
+// set must be satisfied, else the request is denied. An empty set is a
+// pass-through (default-allow). A denial answers a same-origin redirect to
+// denyRedirect when one is configured (app routes only — callers must leave
+// it empty for service routes so API clients always get the 403); otherwise,
+// and always on a policy evaluation error, it answers 403. Neither response
+// carries policy detail; the reason is logged + recorded on the request span.
+// routeName/labels are baked in for the policy input.
+func Gate(policies []*Policy, routeName string, labels map[string]string, denyRedirect string, logger *slog.Logger) chain.Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -35,6 +39,10 @@ func Gate(policies []*Policy, routeName string, labels map[string]string, logger
 				span.AddEvent("authz.deny", trace.WithAttributes(
 					attribute.String("authz.policy", pol.Name),
 					attribute.String("authz.reason", reason)))
+				if denyRedirect != "" && err == nil {
+					http.Redirect(w, r, denyRedirect, http.StatusFound)
+					return
+				}
 				http.Error(w, "forbidden", http.StatusForbidden)
 				return
 			}

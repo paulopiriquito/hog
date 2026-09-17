@@ -1,4 +1,4 @@
-module github.com/paulopiriquito/hog
+module github.com/paulopiriquito/hog/v2
 
 go 1.26
 

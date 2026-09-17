@@ -3,7 +3,7 @@ package gateway
 import (
 	"testing"
 
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/config"
 )
 
 func TestFromResource(t *testing.T) {

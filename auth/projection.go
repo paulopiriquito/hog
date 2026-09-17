@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/route"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/route"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // ProjectionGate strips inbound X-User-* headers (anti-spoof) and, when a

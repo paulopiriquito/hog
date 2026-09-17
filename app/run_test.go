@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/terminal"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/terminal"
 )
 
 // TestRunSetupAndGracefulShutdown is a lifecycle smoke test: Run should load

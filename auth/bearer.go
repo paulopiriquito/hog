@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // BearerVerifier validates a Bearer access token and fetches userinfo. idp.IdP
@@ -43,9 +43,9 @@ func bearerChallenge(ctx context.Context) string {
 
 // BearerGate resolves an Authorization: Bearer access token into a request-context
 // Principal (token claims first, userinfo fallback). It skips when a Principal is
-// already present (cookie wins) or no Bearer header is sent. An invalid token (or
-// a token with no subject) marks the context (invalid_token) and proceeds
-// unauthenticated. Tokens are never logged.
+// already present (cookie wins) or no Bearer header is sent. A token whose subject
+// cannot be resolved — neither `sub` nor the configured `subjectClaim` — marks the
+// context (invalid_token) and proceeds unauthenticated. Tokens are never logged.
 func BearerGate(v BearerVerifier, idCfg session.IdentityConfig, logger *slog.Logger) chain.Middleware {
 	if logger == nil {
 		logger = slog.Default()
@@ -64,8 +64,15 @@ func BearerGate(v BearerVerifier, idCfg session.IdentityConfig, logger *slog.Log
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
 			id, err := v.VerifyAccessToken(ctx, token)
-			if err != nil || id == nil || id.Subject == "" {
-				// invalid, or a token with no subject ⇒ no valid principal (fail-closed)
+			if err != nil || id == nil {
+				// invalid token ⇒ no valid principal (fail-closed)
+				r = r.WithContext(withBearerError(r.Context()))
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Without a configured subject claim the subject can only come from `sub`;
+			// an empty one can never be recovered, so fail closed without calling userinfo.
+			if (idCfg.SubjectClaim == "" || idCfg.SubjectClaim == "sub") && id.Subject == "" {
 				r = r.WithContext(withBearerError(r.Context()))
 				next.ServeHTTP(w, r)
 				return
@@ -79,6 +86,12 @@ func BearerGate(v BearerVerifier, idCfg session.IdentityConfig, logger *slog.Log
 				}
 			}
 			p := session.NewPrincipal(id.Subject, id.Claims, userinfo, token, idCfg)
+			if p.Subject == "" {
+				// no subject from the token nor from the configured claim ⇒ no principal (fail-closed)
+				r = r.WithContext(withBearerError(r.Context()))
+				next.ServeHTTP(w, r)
+				return
+			}
 			r = r.WithContext(session.WithPrincipal(r.Context(), p))
 			next.ServeHTTP(w, r)
 		})

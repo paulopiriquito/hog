@@ -4,7 +4,7 @@ package gateway
 import (
 	"fmt"
 
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/config"
 	"gopkg.in/yaml.v3"
 )
 

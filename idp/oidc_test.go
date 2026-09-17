@@ -227,7 +227,7 @@ func TestPKCEOptional(t *testing.T) {
 func boolPtr(b bool) *bool { return &b }
 
 func TestVerifyAccessTokenRejections(t *testing.T) {
-	f := newFakeIdP(t, "client-1")
+	f := newFakeIdPNoAccessJWKS(t, "client-1")
 	oi, err := newOIDC(context.Background(), oidcConfig{
 		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s",
 		RedirectURL: "https://app/cb", BearerAudience: "api-1",
@@ -255,7 +255,7 @@ func TestVerifyAccessTokenRejections(t *testing.T) {
 }
 
 func TestVerifyAccessTokenAudience(t *testing.T) {
-	f := newFakeIdP(t, "client-1")
+	f := newFakeIdPNoAccessJWKS(t, "client-1")
 	oi, err := newOIDC(context.Background(), oidcConfig{
 		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s",
 		RedirectURL: "https://app/cb", BearerAudience: "api-1",
@@ -289,7 +289,7 @@ func TestVerifyAccessTokenAudience(t *testing.T) {
 }
 
 func TestVerifyAccessTokenDefaultAudienceIsClientID(t *testing.T) {
-	f := newFakeIdP(t, "client-1")
+	f := newFakeIdPNoAccessJWKS(t, "client-1")
 	oi, err := newOIDC(context.Background(), oidcConfig{
 		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
 		// BearerAudience omitted ⇒ defaults to ClientID.
@@ -300,5 +300,166 @@ func TestVerifyAccessTokenDefaultAudienceIsClientID(t *testing.T) {
 	tok := signWith(t, f.priv, f.srv.URL, "client-1", map[string]any{})
 	if _, err := oi.VerifyAccessToken(context.Background(), tok); err != nil {
 		t.Fatalf("default-audience token rejected: %v", err)
+	}
+}
+
+func TestVerifyAccessTokenDedicatedJWKSFromDiscovery(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{AudienceClaim: "client_id"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := oi.VerifyAccessToken(context.Background(), f.subjectlessAccessToken(t, "client-1", "u-10427"))
+	if err != nil {
+		t.Fatalf("subjectless access token rejected: %v", err)
+	}
+	if id.Subject != "" || id.Claims["uid"] != "u-10427" {
+		t.Fatalf("identity = %+v; want empty sub and the uid claim", id)
+	}
+	wrongKey := signRaw(t, f.priv, "test-key", map[string]any{"iss": f.srv.URL, "client_id": "client-1", "exp": time.Now().Add(time.Hour).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), wrongKey); err == nil {
+		t.Fatal("a token signed by the ID-token key must be rejected by the access-token key set")
+	}
+	if _, err := oi.VerifyAccessToken(context.Background(), f.subjectlessAccessToken(t, "client-2", "u")); err == nil {
+		t.Fatal("client_id mismatch must be rejected")
+	}
+	expired := signRaw(t, f.accessPriv, "access-key", map[string]any{"iss": f.srv.URL, "client_id": "client-1", "exp": time.Now().Add(-time.Minute).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), expired); err == nil {
+		t.Fatal("expired token must be rejected")
+	}
+}
+
+func TestVerifyAccessTokenExplicitJWKSURLWins(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{JWKSURL: f.srv.URL + "/jwks", AudienceClaim: "client_id"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signRaw(t, f.priv, "test-key", map[string]any{"iss": f.srv.URL, "client_id": "client-1", "exp": time.Now().Add(time.Hour).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err != nil {
+		t.Fatalf("explicit jwksURL not honoured: %v", err)
+	}
+}
+
+func TestVerifyAccessTokenRequireAudienceFalseAcceptsNoAudience(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{RequireAudience: boolPtr(false)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signRaw(t, f.accessPriv, "access-key", map[string]any{"iss": f.srv.URL, "exp": time.Now().Add(time.Hour).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err != nil {
+		t.Fatalf("no-audience token must pass when requireAudience is false: %v", err)
+	}
+}
+
+// TestVerifyAccessTokenSigningAlgsExplicitOverridesDefault is the C1
+// regression: the dedicated-key-set path (bearer.jwksURL / discovery's
+// jwks_access_token_uri) built a verifier with no SupportedSigningAlgs, so
+// go-oidc silently defaulted to RS256-only. An explicit bearer.signingAlgs
+// must reach the verifier: restricting to ES256 must now reject a token
+// signed with the fake's RS256 access key, proving the field is honoured.
+func TestVerifyAccessTokenSigningAlgsExplicitOverridesDefault(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{AudienceClaim: "client_id", SigningAlgs: []string{"ES256"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := f.subjectlessAccessToken(t, "client-1", "u-10427")
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err == nil {
+		t.Fatal("RS256-signed access token must be rejected when bearer.signingAlgs is restricted to ES256")
+	}
+}
+
+// TestVerifyAccessTokenSigningAlgsFromDiscovery proves the "else discovery
+// list" fallback: with no bearer.signingAlgs override, the dedicated-key-set
+// verifier must pick up id_token_signing_alg_values_supported from discovery.
+// The fake here advertises only ES256, so its RS256-signed access token must
+// be rejected even though nothing in the bearer config mentions algorithms.
+func TestVerifyAccessTokenSigningAlgsFromDiscovery(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	f.signingAlgs = []string{"ES256"}
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{AudienceClaim: "client_id"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := f.subjectlessAccessToken(t, "client-1", "u-10427")
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err == nil {
+		t.Fatal("RS256-signed access token must be rejected when discovery advertises only ES256")
+	}
+}
+
+// TestNewOIDCRejectsRequireAudienceFalseWithAudienceClaim is the C2
+// regression: requireAudience:false together with a set audienceClaim reads
+// as the opposite of what the operator intended (the claim would never be
+// checked) and must be rejected at config load.
+func TestNewOIDCRejectsRequireAudienceFalseWithAudienceClaim(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	_, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{RequireAudience: boolPtr(false), AudienceClaim: "client_id"},
+	})
+	if err == nil {
+		t.Fatal("want error combining bearer.requireAudience:false with bearer.audienceClaim")
+	}
+}
+
+// TestVerifyAccessTokenNilBearerDedicatedJWKSFromDiscovery is the C3
+// regression: with Bearer == nil (its zero value), discovery advertising
+// jwks_access_token_uri must still be picked up automatically, and the
+// standard aud check must still apply against bearerAudience (default:
+// ClientID).
+func TestVerifyAccessTokenNilBearerDedicatedJWKSFromDiscovery(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		// Bearer omitted (nil).
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Signed by the access key with aud == client-1 (the default bearerAudience): verifies.
+	good := signRaw(t, f.accessPriv, "access-key", map[string]any{
+		"iss": f.srv.URL, "aud": "client-1", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if _, err := oi.VerifyAccessToken(context.Background(), good); err != nil {
+		t.Fatalf("access-key-signed token with aud=client-1 rejected: %v", err)
+	}
+	// Signed by the ID-token key: rejected by the dedicated access-token key set.
+	wrongKey := signRaw(t, f.priv, "test-key", map[string]any{
+		"iss": f.srv.URL, "aud": "client-1", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if _, err := oi.VerifyAccessToken(context.Background(), wrongKey); err == nil {
+		t.Fatal("a token signed by the ID-token key must be rejected by the access-token key set")
+	}
+}
+
+func TestVerifyAccessTokenWrongIssuerRejected(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{AudienceClaim: "client_id"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signRaw(t, f.accessPriv, "access-key", map[string]any{"iss": "https://evil.example", "client_id": "client-1", "exp": time.Now().Add(time.Hour).Unix()})
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err == nil {
+		t.Fatal("a token from another issuer must be rejected")
 	}
 }

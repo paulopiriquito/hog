@@ -65,8 +65,12 @@ correlation and additional fields.
 For `app` routes it reads the encrypted session cookie. For `service` routes
 it also accepts an `Authorization: Bearer` token, verified against the
 configured IdP, when no valid cookie is present — the cookie always wins if
-both are sent. A missing or invalid credential does not reject the request
-here; it simply leaves it unauthenticated.
+both are sent. When `identity.assertion.accept` is configured, a `service`
+route runs one more identity sub-stage after Bearer: it verifies an inbound
+identity assertion (a signed statement from a peer HOG instance) and, by
+default, uses it only to *enrich* the principal Bearer already resolved,
+never to authenticate a request by itself. A missing or invalid credential
+does not reject the request here; it simply leaves it unauthenticated.
 
 **auth-gate** enforces the route's effective `auth: required|public` setting.
 This is the stage that turns a missing identity into a rejection: a browser
@@ -76,9 +80,11 @@ preserved as `return_to`; a `service` route gets a `401` with a
 
 **authz** evaluates the route's effective authorization set — its own
 `access.authorize` plus every matching `RouteGroup`'s — against the resolved
-identity and the request's attributes. Any policy that denies returns `403`.
-This stage runs independently of whether a session or IdP is configured at
-all, since a policy can match on request attributes alone.
+identity and the request's attributes. Any policy that denies returns `403`,
+or a `302` to `access.onDeny.redirect` when the route configured one (`app`
+routes only — a `service` route always keeps the `403`). This stage runs
+independently of whether a session or IdP is configured at all, since a
+policy can match on request attributes alone.
 
 A deny short-circuits right there — no further stage runs, and the response
 body carries no policy detail (the reason is logged and recorded on the
@@ -97,7 +103,11 @@ sequenceDiagram
 **projection** strips any inbound `X-User-*` headers as an anti-spoofing
 measure and, only when a principal is present in context, injects identity
 headers for the backend to trust: a subject header, a groups header, and
-either derived or explicitly mapped claim headers.
+either derived or explicitly mapped claim headers. The identity assertion
+header follows the same anti-spoofing pattern elsewhere in the chain: an
+inbound copy is stripped before the session sub-stage that would verify it
+ever reads it, and the only version a backend can receive is one HOG mints
+itself, on a route with `forwardIdentity: true`.
 
 Put together, a request that clears every gate looks like this — session
 resolves the `Principal`, auth-gate and authz let it through, and projection

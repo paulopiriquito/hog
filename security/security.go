@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/paulopiriquito/hog/chain"
+	"github.com/paulopiriquito/hog/v2/chain"
 	"gopkg.in/yaml.v3"
 )
 

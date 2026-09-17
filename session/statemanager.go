@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 )
 
 // stateAAD domain-separates the at-rest server-side record from the stateless

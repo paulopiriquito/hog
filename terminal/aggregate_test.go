@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/session"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"

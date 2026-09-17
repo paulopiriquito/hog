@@ -54,6 +54,13 @@ plugins; it carries the access token but never the refresh token or
 fingerprint, which stay inside the session-lifecycle code alone. Nothing
 downstream of the session gate touches raw session bytes.
 
+The principal's subject defaults to the token's own `sub`, but
+`identity.subjectClaim` can point it at any claim instead, on both the
+cookie and the Bearer paths. This is what makes a token that carries no
+`sub` at all — as some providers issue for access tokens — usable as an
+identity source: the subject just comes from wherever that provider does
+put it.
+
 ## API Bearer auth: the non-browser path
 
 Routes typed `service` also accept `Authorization: Bearer <jwt>` — a token a
@@ -61,10 +68,22 @@ non-browser client obtained directly from the IdP, typically via client
 credentials. HOG verifies it offline against the IdP's cached JWKS (signature,
 issuer, expiry, and audience — configurable, defaulting to the client ID) and
 projects it into the same `Principal` shape the cookie flow produces, so
-downstream code can't tell which path resolved the request. Resolution is
-cookie-first — a valid session takes precedence — and Bearer is accepted only
-on service routes, never on app (SPA) routes, since browsers never send
-`Authorization` automatically and so present no CSRF surface there.
+downstream code can't tell which path resolved the request.
+
+Not every provider signs access tokens the same way it signs ID tokens.
+That mismatch is what the `bearer` block exists for: with certain
+providers, access tokens verify against a key set of their own
+(`bearer.jwksURL`, or the `jwks_access_token_uri` a discovery document can
+advertise separately from `jwks_uri`), and they carry no `sub` and no
+standard `aud` at all — the client identity lives in a claim like
+`client_id` instead, checked via `bearer.audienceClaim`. HOG treats an
+access token without `sub` as valid rather than rejecting it outright,
+provided `identity.subjectClaim` names a claim the token does carry.
+
+Resolution is cookie-first — a valid session takes precedence — and Bearer
+is accepted only on service routes, never on app (SPA) routes, since
+browsers never send `Authorization` automatically and so present no CSRF
+surface there.
 
 The claims that make up a user's passport and how groups are derived are
 configured once, in a shared identity model used by both paths. That
@@ -88,9 +107,11 @@ The session cookie's contents depend on which state provider is configured:
   full record — including the refresh token — lives in an external store
   keyed by that ID, encrypted by HOG before it ever reaches the store. This
   unlocks silent refresh: HOG quietly renews the access token as it nears
-  expiry. HOG ships no storage backend for this — it defines a minimal
-  key-value-with-TTL interface and lets a developer plug in their own store,
-  keeping the core dependency-free.
+  expiry. The core module defines a minimal key-value-with-TTL interface
+  (`session.StateStore`) and stays dependency-free; a store is a plugin
+  living in its own module. HOG ships one, `statestore-valkey`
+  (Valkey-backed), as the reference implementation and a ready-to-use
+  default — a developer can plug in another store the same way.
 
 Both modes share the same `Manager` interface, so nothing above the session
 layer needs to know which one is active.
@@ -112,6 +133,40 @@ Bearer <token>` only when a route explicitly enables it — off by default,
 never logged — because forwarding it hands a backend the ability to call
 further upstream services as the user, a capability that should be a
 deliberate choice, not a default.
+
+## The identity assertion
+
+`X-User-*` headers work for one hop: HOG projects a trustworthy identity
+onto the request it forwards, but that identity doesn't survive a second
+HOG instance sitting further down the chain, because a plain header is
+exactly what the previous section says never to trust from an inbound
+request. The identity assertion exists to cross that second hop without
+falling back to a plain, forgeable header, and without asking the
+downstream instance to re-run userinfo against the IdP for an identity the
+upstream instance already resolved.
+
+Rather than trust a header, the upstream instance signs one: a compact,
+Ed25519-signed JWS naming the subject, passport, and groups it resolved,
+minted fresh per request with a short lifetime (60 seconds by default) and
+carried in its own header, never the caller's session or access token. The
+downstream instance verifies the signature and issuer against a configured
+key before trusting anything in it, and, by default, only lets a valid
+assertion *enrich* a principal a Bearer token has already authenticated on
+that same request — it does not treat the header as a credential on its
+own unless an operator explicitly opts into that.
+
+That default is the load-bearing decision: an assertion is deliberately
+weaker proof than the things HOG already verifies cryptographically end to
+end (an ID token against the IdP's JWKS, a session cookie against HOG's own
+seal). It carries no audience and no unique id, so any instance configured
+with the matching issuer and key accepts it, and a captured token replays
+for the rest of its lifetime plus clock-skew tolerance. Accepting one is
+inherently trusting the issuing instance's own resolution of the principal,
+not independently re-deriving it — a relationship between two deployments
+you operate and have chosen to connect this way, not an independent
+authentication check. Binding it to an already-authenticated principal by
+default keeps that trust relationship from becoming, by itself, a way to
+authenticate a request that reached the downstream instance directly.
 
 See [operations: authentication](../operations/authentication.md) for
 configuration details.

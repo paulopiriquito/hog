@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/paulopiriquito/hog/chain"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // fakeBearer is a minimal BearerVerifier double.
@@ -165,5 +165,43 @@ func TestBearerGateNoHeaderAndCookieWins(t *testing.T) {
 		ServeHTTP(httptest.NewRecorder(), req)
 	if subj != "cookie" {
 		t.Fatalf("cookie principal must win over bearer, got %q", subj)
+	}
+}
+
+func TestBearerGateEmptySubjectSkipsUserInfoWhenUnconfigured(t *testing.T) {
+	// No subjectClaim configured (so subject can only ever come from `sub`) and the
+	// token's `sub` is empty: the subject can never be recovered, so BearerGate must
+	// fail closed without paying for a userinfo round-trip, even though Groups asks
+	// for one.
+	v := &fakeBearer{id: &idp.Identity{Subject: "", Claims: map[string]any{}}}
+	idCfg := session.IdentityConfig{Groups: &session.GroupsConfig{Source: "isMemberOf"}, UserInfo: "auto"}
+	var seen bool
+	var subj, grp string
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer abc")
+	chain.Compose(probe(&seen, &subj, &grp), BearerGate(v, idCfg, nil)).ServeHTTP(rec, req)
+	if seen {
+		t.Fatal("empty sub with no subjectClaim configured must not yield a principal")
+	}
+	if rec.Header().Get("X-Probe-Bearer-Error") != "1" {
+		t.Fatal("must flag invalid_token (fail-closed)")
+	}
+	if v.uiN != 0 {
+		t.Fatalf("userinfo must not be called when the subject can never be recovered, got %d calls", v.uiN)
+	}
+}
+
+func TestBearerGateSubjectFromConfiguredClaim(t *testing.T) {
+	// Some providers' access tokens carry no sub; the configured claim supplies the subject.
+	v := &fakeBearer{id: &idp.Identity{Subject: "", Claims: map[string]any{"uid": "u-10427"}}}
+	var seen bool
+	var subj, grp string
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Authorization", "Bearer abc")
+	chain.Compose(probe(&seen, &subj, &grp), BearerGate(v, session.IdentityConfig{SubjectClaim: "uid", UserInfo: "never"}, nil)).ServeHTTP(rec, req)
+	if !seen || subj != "u-10427" {
+		t.Fatalf("seen=%v subject=%q; want a principal with the uid subject", seen, subj)
 	}
 }

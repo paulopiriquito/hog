@@ -8,9 +8,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/telemetry"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/telemetry"
 )
 
 // Run loads config from path, sets up telemetry, builds the handler using reg,

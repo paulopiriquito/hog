@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/config"
 )
 
 // Config is the decoded, validated `kind: Telemetry` spec.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 )
 
 func testManager(t *testing.T, mut func(*Config)) Manager {
@@ -39,7 +39,7 @@ func TestManagerRoundTripAndDiscardsRefreshToken(t *testing.T) {
 	idt := &idp.Identity{Subject: "u-9", Claims: map[string]any{"name": "Alice"}}
 	userinfo := map[string]any{
 		"email":      "alice@x.co",
-		"isMemberOf": []any{"cn=PT-LM-ROLE-app-admin,ou=app,ou=applicationRole,ou=role,ou=PT-LM,o=corp"},
+		"isMemberOf": []any{"cn=APP-ROLE-myapp-admin,ou=myapp,ou=applicationRole,ou=role,o=example.com"},
 	}
 	tok := &idp.Tokens{AccessToken: "at", RefreshToken: "rt-SECRET", Expiry: time.Now().Add(time.Hour)}
 
@@ -64,7 +64,7 @@ func TestManagerRoundTripAndDiscardsRefreshToken(t *testing.T) {
 	if got.Subject != "u-9" || got.AccessToken != "at" || got.Passport["email"] != "alice@x.co" || got.Passport["name"] != "Alice" {
 		t.Fatalf("read session = %+v", got)
 	}
-	if len(got.Groups) != 1 || got.Groups[0] != "PT-LM-ROLE-app-admin" {
+	if len(got.Groups) != 1 || got.Groups[0] != "APP-ROLE-myapp-admin" {
 		t.Fatalf("groups = %v", got.Groups)
 	}
 }

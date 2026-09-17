@@ -115,7 +115,7 @@ func TestRenderMain(t *testing.T) {
 	src := RenderMain([]Plugin{{ImportPath: "github.com/acme/geo"}, {ImportPath: "github.com/acme/audit"}})
 	for _, want := range []string{
 		`package main`,
-		`"github.com/paulopiriquito/hog"`,
+		`"github.com/paulopiriquito/hog/v2"`,
 		`_ "github.com/acme/geo"`,
 		`_ "github.com/acme/audit"`,
 		`func main() { hog.Main() }`,
@@ -124,7 +124,7 @@ func TestRenderMain(t *testing.T) {
 			t.Fatalf("main.go missing %q:\n%s", want, src)
 		}
 	}
-	if v := RenderMain(nil); !strings.Contains(v, `"github.com/paulopiriquito/hog"`) || strings.Contains(v, "_ \"") {
+	if v := RenderMain(nil); !strings.Contains(v, `"github.com/paulopiriquito/hog/v2"`) || strings.Contains(v, "_ \"") {
 		t.Fatalf("vanilla main.go = %s", v)
 	}
 }
@@ -137,7 +137,7 @@ func TestRenderGoMod(t *testing.T) {
 	for _, want := range []string{
 		"module hogbin",
 		"go 1.26",
-		"replace github.com/paulopiriquito/hog => /src/hog",
+		"replace github.com/paulopiriquito/hog/v2 => /src/hog",
 		"replace github.com/acme/geo => ./plugins/geo",
 	} {
 		if !strings.Contains(gm, want) {

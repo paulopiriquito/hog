@@ -11,7 +11,7 @@ plain `go build`.
 package main
 
 import (
-	"github.com/paulopiriquito/hog"
+	"github.com/paulopiriquito/hog/v2"
 
 	_ "github.com/acme/hog-geoblock" // blank-import each plugin; its init() registers it
 	_ "github.com/acme/hog-audit"

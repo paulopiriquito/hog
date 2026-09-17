@@ -1,11 +1,16 @@
 package terminal
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/auth"
+	"github.com/paulopiriquito/hog/v2/chain"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 func inboundReq(t *testing.T) *http.Request {
@@ -131,6 +136,91 @@ func TestPrepareStripsClientAuthorizationUnlessForwarded(t *testing.T) {
 		prepareBackendRequest(out, in, forwardOptions{forwardAccessToken: true})
 		if got := out.Header.Get("Authorization"); got != "" {
 			t.Fatalf("Authorization must be stripped when no principal, got %q", got)
+		}
+	})
+}
+
+// TestPrepareForwardsAssertionOnlyWhenOptedIn verifies that the identity
+// assertion header (minted upstream by auth.IssueAssertion) reaches the backend
+// request only when the route's forwardIdentity option is set — otherwise it is
+// dropped like Authorization, even when the inbound request carries one.
+func TestPrepareForwardsAssertionOnlyWhenOptedIn(t *testing.T) {
+	t.Run("forwarded_when_opted_in", func(t *testing.T) {
+		in := inboundReq(t)
+		in.Header.Set(auth.DefaultAssertionHeader, "assertion-token")
+		out := newOut(t, in)
+		prepareBackendRequest(out, in, forwardOptions{forwardIdentity: true})
+		if got := out.Header.Get(auth.DefaultAssertionHeader); got != "assertion-token" {
+			t.Fatalf("assertion header = %q, want it forwarded", got)
+		}
+	})
+
+	t.Run("absent_without_opt_in", func(t *testing.T) {
+		in := inboundReq(t)
+		in.Header.Set(auth.DefaultAssertionHeader, "assertion-token")
+		out := newOut(t, in)
+		out.Header.Set(auth.DefaultAssertionHeader, "assertion-token") // simulate ReverseProxy clone
+		prepareBackendRequest(out, in, forwardOptions{})
+		if got := out.Header.Get(auth.DefaultAssertionHeader); got != "" {
+			t.Fatalf("assertion header must be dropped without forwardIdentity, got %q", got)
+		}
+	})
+}
+
+// TestPrepareForwardsAssertionUnderConfiguredHeaderName proves prepareBackendRequest
+// forwards (and strips) the identity assertion under the header name IssueAssertion
+// actually minted it under — not just the default — since with a configured
+// identity.assertion.issue.header, the terminal handler still never sees gateway
+// identity config directly and must learn the name from the request context that
+// IssueAssertion set.
+func TestPrepareForwardsAssertionUnderConfiguredHeaderName(t *testing.T) {
+	const customHeader = "X-Custom-Identity"
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	iss, err := auth.NewAssertionIssuer("go-app", "k1", priv.Seed(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueMW := auth.IssueAssertion(iss, customHeader, nil)
+
+	// mint runs the real IssueAssertion middleware so the returned request
+	// carries both the minted header and whatever context IssueAssertion set,
+	// exactly as terminal handlers see it in production.
+	mint := func(t *testing.T) *http.Request {
+		t.Helper()
+		in := inboundReq(t)
+		in = in.WithContext(session.WithPrincipal(in.Context(), &session.Principal{Subject: "u-1"}))
+		var minted *http.Request
+		chain.Compose(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			minted = r
+		}), issueMW).ServeHTTP(httptest.NewRecorder(), in)
+		return minted
+	}
+
+	t.Run("forwarded_under_the_configured_name_when_opted_in", func(t *testing.T) {
+		in := mint(t)
+		if in.Header.Get(customHeader) == "" {
+			t.Fatal("test setup: IssueAssertion did not mint under the configured header")
+		}
+		out := newOut(t, in)
+		prepareBackendRequest(out, in, forwardOptions{forwardIdentity: true})
+		if out.Header.Get(customHeader) == "" {
+			t.Fatal("assertion must be forwarded under the configured header name")
+		}
+		if got := out.Header.Get(auth.DefaultAssertionHeader); got != "" {
+			t.Fatalf("assertion must not also appear under the default header name, got %q", got)
+		}
+	})
+
+	t.Run("stripped_under_the_configured_name_without_opt_in", func(t *testing.T) {
+		in := mint(t)
+		out := newOut(t, in)
+		out.Header.Set(customHeader, in.Header.Get(customHeader)) // simulate the proxy clone
+		prepareBackendRequest(out, in, forwardOptions{})
+		if got := out.Header.Get(customHeader); got != "" {
+			t.Fatalf("assertion must be stripped under the configured header name, got %q", got)
 		}
 	})
 }

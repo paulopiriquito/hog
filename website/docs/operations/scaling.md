@@ -38,19 +38,41 @@ How much a request depends on shared state is entirely a function of
   written. This unlocks silent refresh: HOG renews the access token behind
   the scenes as it nears expiry (`stateProvider.refreshSkew`, default
   `60s`), single-flighted per session within one process and tolerant of a
-  benign double-refresh across instances. HOG ships **no built-in store** —
-  you implement a small `Get`/`Set`/`Delete`-with-TTL interface
-  (`session.StateStore`) as a plugin (e.g. backed by Redis) and reference it
-  by `type`:
+  benign double-refresh across instances. A store implements a small
+  `Get`/`Set`/`Delete`-with-TTL interface (`session.StateStore`) as a
+  plugin, registered under a `type` name — HOG ships one such plugin,
+  `github.com/paulopiriquito/hog/plugins/statestore-valkey`, backed by
+  [Valkey](https://valkey.io):
 
 ```yaml
+kind: Gateway
+metadata: { name: my-gateway }
 spec:
+  listen: ":8080"
+  plugins:
+    - github.com/paulopiriquito/hog/plugins/statestore-valkey@v1.0.0
   session:
     key: ${SESSION_KEY}
   stateProvider:
-    type: redis          # your registered StateProvider plugin
+    type: valkey
     refreshSkew: 60s
+    config:
+      address: valkey.example.com:6379
+      user: hog
+      password: ${VALKEY_PASSWORD}
+      db: 0
+      tls: true
+      timeout: 3s
 ```
+
+`plugins` compiles the module into the binary via
+[`hog-build`](../developer/building-binaries.md); `stateProvider.config`'s
+`address`, `user`, `password`, `db`, `tls`, and `timeout` are that plugin's
+own fields — the plugin has no TTL setting of its own, since a record's
+lifetime is always whatever `ttl` HOG's session manager passes to `Set`
+(`Gateway.spec.session.ttl`), not something the store configures
+independently. A different store is still a small interface to implement —
+see the plugin's own module for a worked example.
 
 Choosing delegated state means your session store (not HOG) becomes the
 thing that needs its own availability story — size and replicate it the way

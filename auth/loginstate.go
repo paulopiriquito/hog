@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // loginAAD domain-separates the transient login cookie from the session cookie

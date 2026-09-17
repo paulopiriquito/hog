@@ -4,7 +4,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // TestBuildInputNilPrincipalPresentButEmpty is the C1 regression: a nil

@@ -40,6 +40,10 @@ spec:
 | `clientSecret` | string | — | **Required.** Use `${ENV}` — never commit it. |
 | `redirectURL` | string | — | **Required.** Must match what the IdP is configured to redirect back to. Its **path** becomes HOG's callback endpoint (default `/auth/callback` if it can't be parsed). |
 | `bearerAudience` | string | `clientID` | Expected `aud` for verifying `Authorization: Bearer` access tokens (see [API bearer auth](#api-clients-bearer-tokens) below). |
+| `bearer.jwksURL` | string | discovery's `jwks_access_token_uri`, else `jwks_uri` | Key set used to verify `Authorization: Bearer` access tokens, for a provider that signs them with a key set other than the ID token's. |
+| `bearer.audienceClaim` | string | — (checks `aud`) | Claim compared against `bearerAudience` instead of the standard `aud` (e.g. `client_id`). |
+| `bearer.requireAudience` | bool | `true` | Set `false` to accept access tokens that carry no audience at all. Rejected at config load if combined with `bearer.audienceClaim` — the claim would then never be checked. |
+| `bearer.signingAlgs` | []string | the provider's advertised ID-token algorithms | Signature algorithms accepted for access tokens. |
 | `scopes` | []string | `[openid, profile, email]` | Requested OAuth scopes. |
 | `pkce` | bool | `true` | Use PKCE (`S256`) on the authorization code flow. |
 
@@ -151,6 +155,107 @@ ID by default) and projects it into the same identity shape the cookie flow
 produces. Cookie resolution always takes priority: if a valid session
 cookie is present, the Bearer header is ignored. Bearer is never evaluated
 on `app` routes.
+
+### Providers whose access tokens are not ID tokens
+
+Some identity providers sign access tokens with a key set that isn't the ID
+token's `jwks_uri` (advertised separately in discovery as
+`jwks_access_token_uri`), carry the client identity in a claim such as
+`client_id` rather than the standard `aud`, and omit `sub` entirely. The
+`bearer:` block on the `IdP` resource, paired with `identity.subjectClaim`,
+handles all three:
+
+```yaml
+kind: IdP
+metadata: { name: corp-oidc }
+spec:
+  type: oidc
+  issuer: https://idp.example.com
+  clientID: ${OIDC_CLIENT_ID}
+  clientSecret: ${OIDC_CLIENT_SECRET}
+  redirectURL: https://app.example.com/auth/callback
+  bearer:
+    audienceClaim: client_id
+---
+kind: Gateway
+metadata: { name: my-gateway }
+spec:
+  identity:
+    subjectClaim: uid   # the token's own subject-bearing claim, in place of sub
+```
+
+`bearer.jwksURL` overrides the access-token key set explicitly, for a
+discovery document that doesn't advertise `jwks_access_token_uri`.
+`bearer.requireAudience: false` accepts a token that carries no audience
+claim at all; combining it with `bearer.audienceClaim` is rejected when the
+config is loaded, since the claim would then never be checked.
+`bearer.signingAlgs` restricts which signature algorithms an access token
+may use, defaulting to whatever the discovery document advertises for ID
+tokens. See the [configuration reference](configuration.md#gateway-identity)
+for the full `identity.subjectClaim` field description.
+
+### Handing identity to a second HOG instance
+
+A front HOG instance — the one that terminated the browser session or
+verified the Bearer token — can mint a signed statement of the principal it
+resolved and attach it to a proxied request, so a second HOG instance behind
+it can trust that identity without resolving it against the IdP a second
+time:
+
+```yaml
+# front instance: mints on the way out
+spec:
+  identity:
+    assertion:
+      issue:
+        name: go-app                    # iss claim
+        keyId: go-app-2026-09
+        key: ${ASSERTION_SIGNING_KEY}   # base64, 32-byte Ed25519 seed
+        ttl: 60s                        # default
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  handler:
+    type: reverse-proxy
+    upstream: http://api-instance:8080
+    forwardIdentity: true   # only this hop carries the assertion
+```
+
+```yaml
+# second instance: verifies on the way in
+spec:
+  identity:
+    assertion:
+      accept:
+        issuer: go-app
+        keys:
+          - keyId: go-app-2026-09
+            publicKey: ${ASSERTION_VERIFY_KEY}   # base64, the issuer's public key
+```
+
+The front instance mints a fresh assertion — an Ed25519-signed compact
+JWS, never the caller's own access or session token — for every request on
+a route with `forwardIdentity: true`, with a default 60-second lifetime.
+The header (`X-Hog-Identity` by default) is stripped from every inbound
+request on both instances before anything reads it, so a client can never
+supply one of its own; it is set only by HOG itself, on the outbound hop.
+The accepting instance verifies the signature and issuer and, by default
+(`requireBearer: true`), uses the assertion only to *enrich* the principal
+its own Bearer check already authenticated — a header alone does not
+authenticate a request unless you explicitly set `requireBearer: false`.
+
+The assertion carries no audience and no unique id: any instance configured
+with the matching issuer and key accepts it, and a captured assertion can be
+replayed for the rest of its lifetime plus the 30-second clock-skew
+allowance every check applies — which is exactly what the `ttl` (60s by
+default) bounds. Accepting one is trusting the issuing instance's own
+resolution of the passport and groups it asserts, not independently
+re-deriving them: it is a trust relationship between two deployments you
+run, scoped by `issuer` and `keys`, not a substitute for authenticating the
+caller at the edge. See [design: authentication and
+sessions](../design/auth-model.md#the-identity-assertion) for the rationale.
 
 ## A complete worked example
 

@@ -10,11 +10,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/paulopiriquito/hog/app"
-	"github.com/paulopiriquito/hog/idp"
-	"github.com/paulopiriquito/hog/internal/configschema"
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/terminal"
+	"github.com/paulopiriquito/hog/v2/app"
+	"github.com/paulopiriquito/hog/v2/idp"
+	"github.com/paulopiriquito/hog/v2/internal/configschema"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/terminal"
 )
 
 // Register registers a module on the default registry. Call it from a plugin's

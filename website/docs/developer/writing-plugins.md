@@ -75,9 +75,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/paulopiriquito/hog"
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/v2"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/registry"
 )
 
 // spec is the decoded `handler` config for `type: greeter`.
@@ -170,11 +170,16 @@ to a specific interface by the app:
   factory for these kinds must return a `chain.Middleware`
   (`Wrap(next http.Handler) http.Handler`); `chain.Func` adapts a plain
   function. See [core concepts: the middleware chain](../overview/concepts.md#the-middleware-chain).
-- **`config.KindStateProvider`** — a server-side session store. HOG ships no
-  storage backend; you implement `session.StateStore` (`Get`/`Set`/`Delete`
-  over opaque, already-encrypted bytes — your plugin never sees plaintext)
-  and register it under this kind. HOG encrypts every record before your
-  `Set` and decrypts after your `Get`.
+- **`config.KindStateProvider`** — a server-side session store. The core
+  module ships no storage backend; you implement `session.StateStore`
+  (`Get`/`Set`/`Delete` over opaque, already-encrypted bytes — your plugin
+  never sees plaintext) and register it under this kind. HOG encrypts every
+  record before your `Set` and decrypts after your `Get`. `plugins/statestore-valkey`
+  in this repository is a complete, real example: a `StateStore` backed by
+  Valkey, kept in its own Go module (with its own `go.mod`) so
+  `github.com/valkey-io/valkey-go` never becomes a dependency of the core
+  `hog` module — the pattern to follow whenever a plugin's own dependencies
+  shouldn't leak into every build that doesn't need them.
 - **`config.KindIdP`** — an identity-provider connector implementing
   `idp.IdP`. HOG ships a built-in OIDC connector
   (`idp.Register`); registering your own under a different `name` lets a

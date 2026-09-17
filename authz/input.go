@@ -3,7 +3,7 @@ package authz
 import (
 	"net/http"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 )
 
 // buildInput assembles the policy input from the principal, request, and the

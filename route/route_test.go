@@ -3,8 +3,8 @@ package route
 import (
 	"testing"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/selector"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/selector"
 )
 
 func TestParseRoute(t *testing.T) {
@@ -188,5 +188,66 @@ func TestResolveUnionsAuthorize(t *testing.T) {
 	}
 	if got["p4"] {
 		t.Fatalf("non-matching group's policy leaked in: %v", res.Authorize)
+	}
+}
+
+func TestResolveOnDenyRedirect(t *testing.T) {
+	rt := Route{Name: "app", Match: "/", Handler: HandlerSpec{Type: "static"},
+		Access: AccessSpec{Auth: "required", Authorize: []string{"member-tier"}, OnDeny: &OnDenySpec{Redirect: "/no-access"}}}
+	res, err := Resolve(rt, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.OnDeny == nil || res.OnDeny.Redirect != "/no-access" {
+		t.Fatalf("onDeny = %+v", res.OnDeny)
+	}
+
+	g := RouteGroup{Name: "g", Selector: selectorMatchAll(), Access: AccessSpec{OnDeny: &OnDenySpec{Redirect: "/denied"}}}
+	rt2 := Route{Name: "app2", Match: "/x/", Handler: HandlerSpec{Type: "static"}}
+	res2, err := Resolve(rt2, []RouteGroup{g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.OnDeny == nil || res2.OnDeny.Redirect != "/denied" {
+		t.Fatalf("group onDeny not inherited: %+v", res2.OnDeny)
+	}
+
+	// the route's own value wins over a matching group's
+	rt3 := Route{Name: "app3", Match: "/y/", Handler: HandlerSpec{Type: "static"},
+		Access: AccessSpec{OnDeny: &OnDenySpec{Redirect: "/own"}}}
+	res3, err := Resolve(rt3, []RouteGroup{g})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res3.OnDeny.Redirect != "/own" {
+		t.Fatalf("route value must win: %+v", res3.OnDeny)
+	}
+
+	// D1: a leading "/\" is browser-equivalent to "//" under WHATWG URL parsing
+	// for special schemes, so it resolves as protocol-relative and cross-origin
+	// even though it passes a naive "starts with / and not //" check; an
+	// embedded "://" anywhere in the value is rejected too.
+	for _, bad := range []string{
+		"https://evil.example/", "//evil.example/", "utils/overview",
+		"/\\evil.com", "/\\\\evil.com", "/redirect?to=https://evil.example",
+	} {
+		r := Route{Name: "bad", Match: "/b/", Handler: HandlerSpec{Type: "static"},
+			Access: AccessSpec{OnDeny: &OnDenySpec{Redirect: bad}}}
+		if _, err := Resolve(r, nil); err == nil {
+			t.Fatalf("redirect %q must be rejected", bad)
+		}
+	}
+
+	// A same-origin path with an ordinary query string (no "://" anywhere in
+	// it) is not an open-redirect vector and must still pass, matching
+	// auth/loginstate.go's safeReturnTo convention.
+	rt4 := Route{Name: "app4", Match: "/z/", Handler: HandlerSpec{Type: "static"},
+		Access: AccessSpec{OnDeny: &OnDenySpec{Redirect: "/no-access?reason=denied"}}}
+	res4, err := Resolve(rt4, nil)
+	if err != nil {
+		t.Fatalf("query string must be allowed: %v", err)
+	}
+	if res4.OnDeny.Redirect != "/no-access?reason=denied" {
+		t.Fatalf("onDeny = %+v", res4.OnDeny)
 	}
 }

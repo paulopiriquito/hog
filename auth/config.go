@@ -3,7 +3,7 @@ package auth
 import (
 	"fmt"
 
-	"github.com/paulopiriquito/hog/session"
+	"github.com/paulopiriquito/hog/v2/session"
 	"gopkg.in/yaml.v3"
 )
 

@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/paulopiriquito/hog/registry"
-	"github.com/paulopiriquito/hog/terminal"
+	"github.com/paulopiriquito/hog/v2/registry"
+	"github.com/paulopiriquito/hog/v2/terminal"
 )
 
 // Full spine: load resources -> Parse -> Build -> serve, with only built-in

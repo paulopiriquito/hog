@@ -12,23 +12,37 @@ import (
 
 // oidcConfig is the decoded `kind: IdP` spec.
 type oidcConfig struct {
-	Type           string   `yaml:"type"`
-	Issuer         string   `yaml:"issuer"`
-	ClientID       string   `yaml:"clientID"`
-	ClientSecret   string   `yaml:"clientSecret"`
-	RedirectURL    string   `yaml:"redirectURL"`
-	BearerAudience string   `yaml:"bearerAudience"`
-	Scopes         []string `yaml:"scopes"`
-	PKCE           *bool    `yaml:"pkce"`
+	Type           string        `yaml:"type"`
+	Issuer         string        `yaml:"issuer"`
+	ClientID       string        `yaml:"clientID"`
+	ClientSecret   string        `yaml:"clientSecret"`
+	RedirectURL    string        `yaml:"redirectURL"`
+	BearerAudience string        `yaml:"bearerAudience"`
+	Bearer         *bearerConfig `yaml:"bearer"`
+	Scopes         []string      `yaml:"scopes"`
+	PKCE           *bool         `yaml:"pkce"`
+}
+
+// bearerConfig tunes how Authorization: Bearer access tokens are verified. Some
+// providers sign access tokens with a key set that is not the ID-token
+// jwks_uri and issue them without aud or sub.
+type bearerConfig struct {
+	JWKSURL         string   `yaml:"jwksURL"`         // key set for access tokens; default: discovery jwks_access_token_uri, else jwks_uri
+	AudienceClaim   string   `yaml:"audienceClaim"`   // claim compared with bearerAudience instead of aud (e.g. client_id)
+	RequireAudience *bool    `yaml:"requireAudience"` // default true; false accepts tokens with no audience at all
+	SigningAlgs     []string `yaml:"signingAlgs"`     // algorithms accepted for access tokens; defaults to the provider's advertised ID-token algorithms
 }
 
 type oidcIdP struct {
-	oauth2         *oauth2.Config
-	verifier       *oidc.IDTokenVerifier
-	bearerVerifier *oidc.IDTokenVerifier
-	endSession     string
-	provider       *oidc.Provider
-	pkce           bool
+	oauth2           *oauth2.Config
+	verifier         *oidc.IDTokenVerifier
+	bearerVerifier   *oidc.IDTokenVerifier
+	bearerAud        string
+	bearerAudClaim   string
+	bearerRequireAud bool
+	endSession       string
+	provider         *oidc.Provider
+	pkce             bool
 }
 
 func (o *oidcIdP) AuthCodeURL(state, nonce, codeVerifier string) string {
@@ -104,19 +118,49 @@ func (o *oidcIdP) Verify(ctx context.Context, rawJWT string) (*Identity, error) 
 	return identityFrom(idt)
 }
 
-// VerifyAccessToken verifies a Bearer access-token JWT against the IdP's JWKS,
-// checking signature, issuer, expiry, and the bearer audience (default the
-// client ID, overridable via bearerAudience).
-//
-// Caveat: with the default audience (the client ID), an id_token (whose aud is
-// also the client ID) will also pass. Operators wanting strict access-token-only
-// acceptance must configure a distinct bearerAudience.
+// VerifyAccessToken verifies a Bearer access-token JWT: signature against the
+// access-token key set (bearer.jwksURL, else discovery's jwks_access_token_uri,
+// else the ID-token JWKS), issuer and expiry; then the audience: the standard
+// aud (default) or bearer.audienceClaim (e.g. client_id) must equal
+// bearerAudience (the client ID by default), unless bearer.requireAudience is
+// false. A token without sub is accepted — the session layer resolves the
+// subject from identity.subjectClaim.
 func (o *oidcIdP) VerifyAccessToken(ctx context.Context, rawJWT string) (*Identity, error) {
 	idt, err := o.bearerVerifier.Verify(ctx, rawJWT)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: verify access token: %w", err)
 	}
-	return identityFrom(idt)
+	id, err := identityFrom(idt)
+	if err != nil {
+		return nil, err
+	}
+	if o.bearerRequireAud && o.bearerAudClaim != "" {
+		if !claimHas(id.Claims[o.bearerAudClaim], o.bearerAud) {
+			return nil, fmt.Errorf("oidc: verify access token: %s does not match the expected audience", o.bearerAudClaim)
+		}
+	}
+	return id, nil
+}
+
+// claimHas reports whether a string or string-array claim contains want.
+func claimHas(v any, want string) bool {
+	switch t := v.(type) {
+	case string:
+		return t == want
+	case []any:
+		for _, e := range t {
+			if s, ok := e.(string); ok && s == want {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range t {
+			if s == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (o *oidcIdP) LogoutURL(idTokenHint, postLogoutRedirect string) (string, bool) {
@@ -168,12 +212,54 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 		return nil, fmt.Errorf("oidc: discovery for %q: %w", cfg.Issuer, err)
 	}
 	var disco struct {
-		EndSession string `json:"end_session_endpoint"`
+		EndSession      string   `json:"end_session_endpoint"`
+		AccessTokenJWKS string   `json:"jwks_access_token_uri"` // when advertised: access tokens use their own key set
+		SigningAlgs     []string `json:"id_token_signing_alg_values_supported"`
 	}
-	_ = provider.Claims(&disco) // end_session is optional
+	_ = provider.Claims(&disco) // end_session, jwks_access_token_uri and the signing-alg list are all optional
 	bearerAud := cfg.BearerAudience
 	if bearerAud == "" {
 		bearerAud = cfg.ClientID
+	}
+	requireAud := true
+	audClaim := ""
+	jwksURL := disco.AccessTokenJWKS
+	var signingAlgs []string
+	if cfg.Bearer != nil {
+		if cfg.Bearer.RequireAudience != nil {
+			requireAud = *cfg.Bearer.RequireAudience
+		}
+		audClaim = cfg.Bearer.AudienceClaim
+		if cfg.Bearer.JWKSURL != "" {
+			jwksURL = cfg.Bearer.JWKSURL
+		}
+		signingAlgs = cfg.Bearer.SigningAlgs
+	}
+	if !requireAud && audClaim != "" {
+		return nil, fmt.Errorf("oidc: bearer.requireAudience false cannot be combined with bearer.audienceClaim (the claim would never be checked)")
+	}
+	if len(signingAlgs) == 0 {
+		signingAlgs = disco.SigningAlgs
+	}
+	// The standard aud check stays inside go-oidc unless the token carries no aud
+	// (requireAudience false) or the audience lives in another claim (checked after Verify).
+	bearerCfg := &oidc.Config{ClientID: bearerAud}
+	if !requireAud || audClaim != "" {
+		bearerCfg = &oidc.Config{SkipClientIDCheck: true}
+	}
+	var bearerVerifier *oidc.IDTokenVerifier
+	if jwksURL != "" {
+		// provider.Verifier (the else branch) already copies the discovery
+		// document's id_token_signing_alg_values_supported into its Config; a
+		// verifier built directly against a dedicated key set does not go
+		// through that path, so it must be set explicitly here or go-oidc
+		// silently falls back to RS256 only.
+		if len(signingAlgs) > 0 {
+			bearerCfg.SupportedSigningAlgs = signingAlgs
+		}
+		bearerVerifier = oidc.NewVerifier(cfg.Issuer, oidc.NewRemoteKeySet(ctx, jwksURL), bearerCfg)
+	} else {
+		bearerVerifier = provider.Verifier(bearerCfg)
 	}
 	return &oidcIdP{
 		oauth2: &oauth2.Config{
@@ -183,10 +269,13 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 			RedirectURL:  cfg.RedirectURL,
 			Scopes:       scopes,
 		},
-		verifier:       provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
-		bearerVerifier: provider.Verifier(&oidc.Config{ClientID: bearerAud}),
-		endSession:     disco.EndSession,
-		provider:       provider,
-		pkce:           pkce,
+		verifier:         provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		bearerVerifier:   bearerVerifier,
+		bearerAud:        bearerAud,
+		bearerAudClaim:   audClaim,
+		bearerRequireAud: requireAud,
+		endSession:       disco.EndSession,
+		provider:         provider,
+		pkce:             pkce,
 	}, nil
 }

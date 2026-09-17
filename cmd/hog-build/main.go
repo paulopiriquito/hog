@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/paulopiriquito/hog/internal/hogbuild"
+	"github.com/paulopiriquito/hog/v2/internal/hogbuild"
 )
 
 type replaceFlag []hogbuild.Replace

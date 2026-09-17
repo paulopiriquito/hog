@@ -12,6 +12,12 @@ HOG keeps a small, focused dependency set. Direct runtime dependencies (from `go
 | go.opentelemetry.io/otel (+ sdk, otlp exporters, otelhttp contrib) | Opt-in traces/metrics over OTLP, W3C propagation, HTTP instrumentation, span attributes | `telemetry/`, `app/build.go`, `authz/gate.go`, `chain/builtin.go` |
 | gopkg.in/yaml.v3 | Config decoding (Kubernetes-style YAML resources) | `app/`, `auth/`, `authz/`, `config/`, `gateway/`, `registry/`, `route/`, `security/`, `session/` |
 
+`github.com/valkey-io/valkey-go` is **not** a dependency of the core `hog` module above. It's used
+only by the nested `plugins/statestore-valkey` module (its own `go.mod`/`go.sum`), a
+`session.StateStore` implementation shipped as an optional, separately-versioned plugin — see
+[developer: writing plugins](../website/docs/developer/writing-plugins.md). Building the core
+module, or any binary that doesn't list that plugin, never pulls it in.
+
 Everything else in `go.sum` is an indirect dependency pulled in by the above (notably OPA's
 Rego/JSON stack — `lestrrat-go/*`, `gobwas/glob`, `valyala/fastjson`, etc. — and the
 OpenTelemetry SDK/gRPC/protobuf stack). Test tooling (`chromedp`, `testify`) lives only in the

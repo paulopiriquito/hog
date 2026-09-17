@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/paulopiriquito/hog/config"
-	"github.com/paulopiriquito/hog/selector"
+	"github.com/paulopiriquito/hog/v2/config"
+	"github.com/paulopiriquito/hog/v2/selector"
 	"gopkg.in/yaml.v3"
 )
 
@@ -49,11 +49,19 @@ type Route struct {
 }
 
 // AccessSpec is a route's (or group's) access-control block: authentication,
-// authorization policy references, and identity projection.
+// authorization policy references, identity projection, and deny handling.
 type AccessSpec struct {
 	Auth       string            `yaml:"auth"`      // required | public
 	Authorize  []string          `yaml:"authorize"` // names of kind: Policy resources
 	Projection *ProjectionConfig `yaml:"projection"`
+	OnDeny     *OnDenySpec       `yaml:"onDeny"`
+}
+
+// OnDenySpec says what an authorization denial answers instead of the default
+// 403: a same-origin redirect, honoured on app routes only — a service route
+// keeps the 403 so API clients never follow a login-shaped detour.
+type OnDenySpec struct {
+	Redirect string `yaml:"redirect"` // same-origin path, e.g. /no-access
 }
 
 // ProjectionConfig customizes identity-header projection. The request section is
@@ -112,21 +120,24 @@ func ParseGroup(r config.Resource) (RouteGroup, error) {
 	return out, nil
 }
 
-// Resolved is a route's effective type, auth, projection, and authorization set.
+// Resolved is a route's effective type, auth, projection, authorization set,
+// and deny handling.
 type Resolved struct {
 	Type       string // app | service
 	Auth       string // required | public
 	Projection *ProjectionConfig
 	Authorize  []string // names of kind: Policy resources to enforce
+	OnDeny     *OnDenySpec
 }
 
-// Resolve computes a route's effective type, auth, projection, and authorization
+// Resolve computes a route's effective type, auth, projection, authorization
 // set (the route's own access.authorize unioned with every matching RouteGroup's,
-// deduped) from the route's own fields, matching RouteGroups (document order,
-// later wins for scalars), and type-inferred defaults.
+// deduped), and deny handling from the route's own fields, matching RouteGroups
+// (document order, later wins for scalars), and type-inferred defaults.
 func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 	var gType, gAuth string
 	var proj *ProjectionConfig
+	var onDeny *OnDenySpec
 	for _, g := range groups {
 		if g.Selector.Matches(rt.Labels) {
 			if g.Type != "" {
@@ -137,6 +148,9 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 			}
 			if g.Access.Projection != nil {
 				proj = g.Access.Projection
+			}
+			if g.Access.OnDeny != nil {
+				onDeny = g.Access.OnDeny
 			}
 		}
 	}
@@ -167,6 +181,24 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 		proj = rt.Access.Projection
 	}
 
+	if rt.Access.OnDeny != nil {
+		onDeny = rt.Access.OnDeny
+	}
+	if onDeny != nil && onDeny.Redirect != "" {
+		// A leading "/\" is browser-equivalent to "//" under WHATWG URL parsing
+		// for special schemes, so it resolves as protocol-relative and
+		// cross-origin even though it passes a naive "/ but not //" check; an
+		// embedded "://" anywhere is rejected too. Mirrors auth/loginstate.go's
+		// safeReturnTo.
+		redirect := onDeny.Redirect
+		if !strings.HasPrefix(redirect, "/") ||
+			strings.HasPrefix(redirect, "//") ||
+			strings.HasPrefix(redirect, "/\\") ||
+			strings.Contains(redirect, "://") {
+			return Resolved{}, fmt.Errorf("route %q: access.onDeny.redirect must be a same-origin path (got %q)", rt.Name, onDeny.Redirect)
+		}
+	}
+
 	var authorize []string
 	seen := map[string]bool{}
 	add := func(names []string) {
@@ -184,7 +216,7 @@ func Resolve(rt Route, groups []RouteGroup) (Resolved, error) {
 		}
 	}
 
-	return Resolved{Type: typ, Auth: auth, Projection: proj, Authorize: authorize}, nil
+	return Resolved{Type: typ, Auth: auth, Projection: proj, Authorize: authorize, OnDeny: onDeny}, nil
 }
 
 // inferType maps a handler type to a default route type.

@@ -171,7 +171,10 @@ auth. Omitting the block uses the defaults below.
 | `groups.match` | []string | — | Case-insensitive substring patterns; only DNs containing at least one are kept. **A group with no `match` entries never matches anything** — set at least one pattern for `groups` to have any effect. |
 | `groups.render` | string | `cn` | `cn` (extract the `cn=` component) or `dn` (keep the whole DN). |
 | `groups.as` | string | `groups` | The session field / default projected-header name for the rendered group list. |
+| `groups.strip` | []string | — | Case-insensitive prefixes removed from each rendered group value; the first matching prefix wins. An empty list leaves values unchanged. |
 | `userInfo` | string | `auto` | `auto` (fetch userinfo only if the token is missing a configured claim/group source), `always`, or `never`. |
+| `subjectClaim` | string | `sub` | Claim that becomes the principal subject (`X-User-Id`) on both the cookie and the Bearer paths. Userinfo wins over the token when both carry the claim; if the claim is absent or not a string, the token's own `sub` is used instead — the subject is never silently empty. Set this for providers whose access tokens carry no `sub`. |
+| `assertion` | mapping | — | Identity hand-off to a second HOG instance (see below). |
 
 ```yaml
 spec:
@@ -182,6 +185,43 @@ spec:
       match: ["ou=engineering"]
       render: cn
       as: groups
+      strip: ["role-staff-"]
+    subjectClaim: uid
+```
+
+#### `identity.assertion`
+
+Lets an upstream HOG instance mint a short-lived, signed statement of the
+principal it resolved, and a downstream HOG instance accept it instead of
+resolving the identity against the IdP a second time. `issue`, `accept`, or
+both may be configured on the same instance. See
+[authentication](authentication.md#handing-identity-to-a-second-hog-instance).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `issue.name` | string | — | **Required.** The `iss` claim identifying this instance to the peer that accepts it. |
+| `issue.keyId` | string | — | **Required.** The `kid` header identifying the signing key. |
+| `issue.key` | string | — | **Required.** A 32-byte Ed25519 seed, base64-encoded (standard or raw-URL-safe). |
+| `issue.ttl` | duration string | `60s` | How long a minted assertion is valid. Must be `> 0`. |
+| `issue.header` | string | `X-Hog-Identity` | Header the assertion is written to. |
+| `accept.issuer` | string | — | **Required.** Expected `iss` claim — the peer instance's `assertion.issue.name`. |
+| `accept.header` | string | `X-Hog-Identity` | Header the assertion is read from. |
+| `accept.requireBearer` | bool | `true` | When `true`, the assertion only enriches a principal a verified Bearer token already authenticated, and only when the asserted subject matches the token's; a mismatched or unaccompanied assertion is ignored rather than rejecting the request. When `false`, a valid assertion authenticates a request on its own. |
+| `accept.keys` | []mapping | — | **Required, at least one.** Verification keys, one per accepted signer: `keyId` (matches the peer's `issue.keyId`) and `publicKey` (a 32-byte Ed25519 public key, base64-encoded). |
+
+```yaml
+spec:
+  identity:
+    assertion:
+      issue:
+        name: go-app
+        keyId: go-app-2026-09
+        key: ${ASSERTION_SEED}
+      accept:
+        issuer: hog-edge
+        keys:
+          - keyId: hog-edge-2026-09
+            publicKey: ${HOG_EDGE_PUBLIC_KEY}
 ```
 
 ### Gateway: `auth`
@@ -214,20 +254,25 @@ session key encrypts the at-rest record). See
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `type` | string | — | **Required.** The registered `StateProvider` module name (a plugin you write — HOG ships none built in). |
+| `type` | string | — | **Required.** The registered `StateProvider` module name. `valkey` is the state provider HOG ships (`plugins/statestore-valkey`, a nested Go module added via the gateway's `plugins:` list and `hog-build` so its dependency stays out of the core binary); no other built-in types ship in HOG itself. |
 | `refreshSkew` | duration string | `60s` | How early before the access token's expiry to silently refresh it. |
 | `keyPrefix` | string | `hog:sess:` | Prefix applied to the store key derived from the session ID. |
-| `config` | mapping | — | Opaque; passed verbatim to the registered `StateProvider` factory (e.g. Redis connection settings). |
+| `config` | mapping | — | Opaque; passed verbatim to the registered `StateProvider` factory. For `type: valkey`: `address` (required), `user` (default `default`), `password`, `db` (default `0`), `tls` (default `false`), `timeout` (default `3s`) — see [scaling](scaling.md#session-state). |
 
 ```yaml
 spec:
   session:
     key: ${SESSION_KEY}
   stateProvider:
-    type: redis
+    type: valkey
     refreshSkew: 60s
     config:
-      addr: redis:6379
+      address: valkey:6379
+      user: hog
+      password: ${VALKEY_PASSWORD}
+      db: 0
+      tls: true
+      timeout: 3s
 ```
 
 ---
@@ -267,6 +312,22 @@ the inline `access:` block on a `Route`/`RouteGroup`.
 | `auth` | string | inferred | `required` or `public`. Unset defaults from the route's `type`: `service` → `required`, `app` → `public`. |
 | `authorize` | []string | — | Names of `kind: Policy` (authorization) resources to enforce on this route, unioned with any matching `RouteGroup`'s `access.authorize`. See [authorization](authorization.md). |
 | `projection` | mapping | derive from passport | Customizes the `X-User-*` headers injected for the backend. See below. |
+| `onDeny` | mapping | — | What an authorization denial answers instead of the default `403`. Honoured on `app` routes only — a `service` route always keeps the `403`. See [authorization](authorization.md). |
+
+`onDeny`:
+
+| Field | Type | Description |
+|---|---|---|
+| `redirect` | string | Same-origin path an authorization denial redirects to (`302`), e.g. `/utils/overview`. Must start with `/` and must not start with `//` or `/\`, or contain `://` — validated at config load. |
+
+```yaml
+spec:
+  access:
+    auth: required
+    authorize: [admins-only]
+    onDeny:
+      redirect: /
+```
 
 `projection`:
 
@@ -395,6 +456,7 @@ Streams responses (SSE, WebSockets).
 | `preserveHost` | bool | `false` | Forward the inbound `Host` header instead of the upstream's. |
 | `forwardAccessToken` | bool | `false` | Inject `Authorization: Bearer <access token>` from the session principal. Off by default — see [security hardening](security.md). |
 | `forwardCookies` | bool | `false` | Pass the inbound `Cookie` header through. Off by default — HOG's own session/login cookies are never meant to reach a backend. |
+| `forwardIdentity` | bool | `false` | Forward the identity assertion minted by `identity.assertion.issue` to this upstream — for handing a verified identity to a second HOG instance. See [authentication](authentication.md#handing-identity-to-a-second-hog-instance). |
 | `timeout` | duration string | none | Per-request timeout. A timed-out request returns `504`; any other proxy error returns `502`. |
 | `insecureSkipVerify` | bool | `false` | Disable upstream TLS certificate verification. Use only for trusted internal backends with self-signed certs. |
 
@@ -430,6 +492,7 @@ a key per backend.
 | `required` | bool | `true` | If `true`, a failed/timed-out call fails the whole request (`502`/`504`); if `false`, the backend is omitted and its group name is listed in the `X-Hog-Partial` response header. |
 | `forwardQuery` | bool | `false` | Forward the inbound request's query string to this backend. |
 | `forwardAccessToken` | bool | `false` | Inject `Authorization: Bearer <access token>` for this backend only. |
+| `forwardIdentity` | bool | `false` | Forward the identity assertion minted by `identity.assertion.issue` to this backend only. See [authentication](authentication.md#handing-identity-to-a-second-hog-instance). |
 
 A 2xx response that isn't valid JSON (including an empty body) is treated as
 a backend failure. A single backend response is capped at 10 MiB.
@@ -481,15 +544,18 @@ spec:
 ## Complete example
 
 The annotated document below combines every resource kind covered on this
-page — `Gateway` (session, identity, security), `IdP`, `Telemetry`, three
-`Route`s (`static`, `reverse-proxy`, `api`), a `RouteGroup`, and both policy
-tiers (`require` and `rego`) — into one config that actually loads and
-parses (it's exercised by a Go test in the repo, `app/full_config_test.go`,
-so it can't silently drift from the field names above). The source file
-lives at
+page — `Gateway` (session, identity including the subject claim, group
+strip and identity assertion, security, the Valkey `stateProvider`), `IdP`
+(including the `bearer:` block), `Telemetry`, four `Route`s (`static` ×2 —
+one of them gated with `onDeny.redirect` — `reverse-proxy` and `api`, both
+with `forwardIdentity` set), a `RouteGroup`, and both policy tiers
+(`require` and `rego`) — into one config that actually loads and parses
+(it's exercised by a Go test in the repo, `app/full_config_test.go`, so it
+can't silently drift from the field names above). The source file lives at
 [`website/docs/examples/full-config.yaml`](../examples/full-config.yaml).
 
 ```yaml
+# yaml-language-server: $schema=https://paulopiriquito.github.io/hog/hog.schema.json
 # =============================================================================
 # HOG — complete, annotated configuration example
 # =============================================================================
@@ -526,6 +592,14 @@ spec:
   trustedProxies:
     - 10.0.0.0/8
 
+  # Build-time module manifest: Go import paths of plugin packages linked
+  # into the binary by the hog-build tool. Here, the Valkey state-provider
+  # plugin used by `stateProvider` below — it lives in its own Go module
+  # (plugins/statestore-valkey) so its dependency never reaches the core
+  # hog module.
+  plugins:
+    - github.com/paulopiriquito/hog/plugins/statestore-valkey
+
   # The encrypted, HttpOnly session cookie (stateless BFF mode). Omit this
   # whole block to run HOG as a pure reverse-proxy/aggregation gateway with
   # no login flow.
@@ -538,8 +612,14 @@ spec:
 
   # The claim/group projection model shared by cookie sessions and Bearer
   # auth. Omitting this block uses HOG's defaults (claims:
-  # [email, name, given_name, family_name], no groups, userInfo: auto).
+  # [email, name, given_name, family_name], no groups, userInfo: auto,
+  # subjectClaim: sub).
   identity:
+    # Claim that becomes the principal subject (X-User-Id) on both the
+    # cookie and the Bearer paths. Our IdP (see the OIDC bearer: block
+    # below) is one of those providers whose access tokens carry no sub,
+    # so the subject comes from uid instead. Defaults to "sub".
+    subjectClaim: uid
     groups:
       # The userinfo/ID-token claim holding the group-DN array.
       source: isMemberOf
@@ -554,6 +634,43 @@ spec:
       # Session field name / default projected-header name for the
       # rendered group list (e.g. X-User-Groups).
       as: groups
+      # Case-insensitive prefixes removed from each rendered group value;
+      # the first matching prefix wins. Turns "role-staff-admin" into
+      # "admin".
+      strip:
+        - "role-staff-"
+
+    # Identity hand-off to a second HOG instance: this gateway both mints
+    # assertions for routes with handler.forwardIdentity: true (below) and
+    # accepts assertions minted by an upstream HOG instance for its own
+    # inbound requests.
+    assertion:
+      issue:
+        # The iss claim identifying this instance to the peer that accepts it.
+        name: go-app
+        # The kid header identifying the signing key below.
+        keyId: go-app-2026-09
+        # 32-byte Ed25519 seed, base64-encoded. `${ASSERTION_SEED:-}`
+        # resolves to an empty value when unset, purely so this example
+        # parses standalone; a real deployment MUST set ASSERTION_SEED
+        # (e.g. `openssl rand -base64 32`) and never commit the value.
+        key: ${ASSERTION_SEED:-hn77ZO9l+0JGLztjOOirQBMlzcPCEVj/L3KMjORfPVE=}
+        # How long a minted assertion is valid. Defaults to "60s".
+        ttl: 60s
+        # Header carrying the assertion. Defaults to "X-Hog-Identity".
+        header: X-Hog-Identity
+      accept:
+        # Expected iss claim: the upstream instance's assertion.issue.name.
+        issuer: hog-edge
+        header: X-Hog-Identity
+        # Defaults to true: the assertion only enriches a principal a
+        # verified Bearer token already authenticated, and only when the
+        # subject matches — a header alone never authenticates on its own.
+        requireBearer: true
+        keys:
+          # kid → the upstream instance's Ed25519 public key, base64.
+          - keyId: hog-edge-2026-09
+            publicKey: kqPVKwZZ6E3fLpbM8cU7d4ANRUGhKtMt0TrQ3YFbnkY=
 
   # CSRF protection and security response headers, applied gateway-wide as
   # the outermost wrapper around every response (routes and the raw
@@ -589,6 +706,33 @@ spec:
       # on the frontend served) — opt in explicitly.
       contentSecurityPolicy: "default-src 'self'"
 
+  # Opt-in server-side session storage (silent access-token refresh across a
+  # multi-instance deployment). Requires `session` above to also be set.
+  # "valkey" is the state provider HOG ships (plugins/statestore-valkey,
+  # registered above via `plugins:`); omit this whole block to run in pure
+  # stateless-cookie mode.
+  stateProvider:
+    type: valkey
+    # How early before the access token's expiry to silently refresh it.
+    refreshSkew: 60s
+    # Prefix applied to the store key derived from the session ID.
+    keyPrefix: "hog:sess:"
+    # Opaque; passed verbatim to the valkey plugin's factory.
+    config:
+      # host:port of the Valkey/Redis server. Required.
+      address: valkey.example.com:6379
+      # ACL username. Defaults to "default" (Valkey's default ACL user).
+      user: hog
+      # `${VALKEY_PASSWORD:-}` resolves to an empty value when unset, purely
+      # so this example parses standalone; set a real secret for actual use.
+      password: ${VALKEY_PASSWORD:-}
+      # Logical database index. Defaults to 0.
+      db: 0
+      # Use TLS to connect. Defaults to false.
+      tls: true
+      # Per-command timeout, a Go duration string. Defaults to "3s".
+      timeout: 3s
+
 ---
 # -----------------------------------------------------------------------------
 # IdP — the OIDC connector. HOG supports exactly one active IdP today.
@@ -617,6 +761,24 @@ spec:
     - openid
     - profile
     - email
+
+  # Tunes Bearer access-token verification for providers whose access
+  # tokens use their own key set and carry no aud — such a provider puts
+  # the client identity in client_id and the subject in a
+  # provider-specific claim like uid instead of sub (see
+  # identity.subjectClaim above).
+  bearer:
+    # Key set for access tokens. Defaults to the discovery document's
+    # jwks_access_token_uri, else jwks_uri; set explicitly when a provider
+    # doesn't advertise jwks_access_token_uri.
+    jwksURL: https://idp.example.com/ext/oauth/jwks
+    # Claim compared with bearerAudience (defaults to clientID) instead of
+    # the standard aud.
+    audienceClaim: client_id
+    # Algorithms accepted for access tokens. Defaults to the discovery
+    # document's ID-token algorithm list.
+    signingAlgs:
+      - RS256
 
 ---
 # -----------------------------------------------------------------------------
@@ -670,6 +832,34 @@ spec:
 
 ---
 # -----------------------------------------------------------------------------
+# Route — a second, gated app frontend: a denied visitor is redirected to a
+# same-origin page instead of shown a bare 403.
+# -----------------------------------------------------------------------------
+apiVersion: hog.dev/v1
+kind: Route
+metadata:
+  name: admin
+spec:
+  match: /admin/
+  type: app
+  handler:
+    type: static
+    dir: /srv/admin
+    index: index.html
+    spaFallback: true
+  access:
+    auth: required
+    authorize:
+      - staff
+    # What an authorization denial answers instead of the default 403.
+    # Honoured on app routes only — a service route always keeps the 403.
+    onDeny:
+      # Same-origin path; must start with "/" and not "//"/"/\", and must
+      # not contain "://" — validated at config load.
+      redirect: /
+
+---
+# -----------------------------------------------------------------------------
 # Route — authenticated reverse-proxy to a single backend service.
 # -----------------------------------------------------------------------------
 apiVersion: hog.dev/v1
@@ -699,6 +889,11 @@ spec:
     # Pass the inbound Cookie header through. Off by default — HOG's own
     # session/login cookies are never meant to reach a backend.
     forwardCookies: false
+    # Forward the identity assertion minted by identity.assertion.issue to
+    # this upstream — account-svc is itself a second HOG instance, which
+    # verifies the assertion (identity.assertion.accept) instead of calling
+    # userinfo again. Off by default.
+    forwardIdentity: true
     # Per-request timeout; a timeout returns 504, any other proxy error 502.
     timeout: 10s
     # Disable upstream TLS certificate verification. Use only for trusted
@@ -756,6 +951,10 @@ spec:
         forwardQuery: false
         # Inject Authorization: Bearer <access token> for this backend only.
         forwardAccessToken: true
+        # Forward the identity assertion minted by identity.assertion.issue
+        # to this backend only — users-svc is a second HOG instance. Off by
+        # default.
+        forwardIdentity: true
       - group: notifications
         upstream: http://notif-svc:9100
         path: /unread

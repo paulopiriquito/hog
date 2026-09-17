@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/paulopiriquito/hog/registry"
+	"github.com/paulopiriquito/hog/v2/registry"
 )
 
 func TestHealthHandler(t *testing.T) {

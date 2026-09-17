@@ -3,7 +3,7 @@ package telemetry
 import (
 	"testing"
 
-	"github.com/paulopiriquito/hog/config"
+	"github.com/paulopiriquito/hog/v2/config"
 )
 
 func cfgResource(t *testing.T, spec string) config.Resource {

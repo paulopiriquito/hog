@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/paulopiriquito/hog/idp"
+	"github.com/paulopiriquito/hog/v2/idp"
 )
 
 func stateMgr(t *testing.T, store StateStore, mut func(*Config)) Manager {
