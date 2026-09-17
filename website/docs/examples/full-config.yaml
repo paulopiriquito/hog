@@ -93,11 +93,12 @@ spec:
         name: go-app
         # The kid header identifying the signing key below.
         keyId: go-app-2026-09
-        # 32-byte Ed25519 seed, base64-encoded. `${ASSERTION_SEED:-}`
-        # resolves to an empty value when unset, purely so this example
-        # parses standalone; a real deployment MUST set ASSERTION_SEED
-        # (e.g. `openssl rand -base64 32`) and never commit the value.
-        key: ${ASSERTION_SEED:-hn77ZO9l+0JGLztjOOirQBMlzcPCEVj/L3KMjORfPVE=}
+        # 32-byte Ed25519 seed, base64-encoded. The fallback below is all
+        # zero bytes, a placeholder that lets this example parse on its own.
+        # It is not a key: signing with it is signing with a key everyone
+        # has. A real deployment sets ASSERTION_SEED (`openssl rand -base64
+        # 32`) and never commits the value.
+        key: ${ASSERTION_SEED:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}
         # How long a minted assertion is valid. Defaults to "60s".
         ttl: 60s
         # Header carrying the assertion. Defaults to "X-Hog-Identity".

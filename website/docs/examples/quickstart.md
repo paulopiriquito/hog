@@ -13,7 +13,7 @@ to you, or jump straight to the one that matches what you're building.
     - None of the three need a published HOG image — the
       `hog-runtime`/`hog-static` image family isn't on a registry yet, so
       each guide builds them locally from a clone of the repository. See
-      [Delivering HOG](https://github.com/paulopiriquito/hog/v2/blob/v2/docs/delivery.md)
+      [Delivering HOG](https://github.com/paulopiriquito/hog/blob/v2/docs/delivery.md)
       for why.
 
 ## The three guides

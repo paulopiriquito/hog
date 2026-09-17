@@ -2,6 +2,10 @@
 
 Release notes and upgrade guidance for HOG.
 
+- [**HOG v2.1.1**](v2.1.1.md) — applies `bearer.signingAlgs` on every
+  verifier path, refuses `forwardIdentity` without an assertion issuer,
+  replaces a working signing seed in the example configuration, and
+  repairs the repository links the module rename broke.
 - [**HOG v2.1.0**](v2.1.0.md) — access tokens from a dedicated key set, a
   configurable subject claim, group prefix strip, an authorization
   deny-redirect, an identity assertion between HOG instances, and a shipped

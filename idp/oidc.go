@@ -247,16 +247,17 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 	if !requireAud || audClaim != "" {
 		bearerCfg = &oidc.Config{SkipClientIDCheck: true}
 	}
+	// Set on both paths. A verifier built against a dedicated key set never goes
+	// through provider.Verifier, which is what would otherwise copy the discovery
+	// document's id_token_signing_alg_values_supported in, and go-oidc would then
+	// fall back to RS256 only. On the provider.Verifier path an explicit
+	// bearer.signingAlgs must win over the advertised list, which it does not if
+	// the field is left empty here.
+	if len(signingAlgs) > 0 {
+		bearerCfg.SupportedSigningAlgs = signingAlgs
+	}
 	var bearerVerifier *oidc.IDTokenVerifier
 	if jwksURL != "" {
-		// provider.Verifier (the else branch) already copies the discovery
-		// document's id_token_signing_alg_values_supported into its Config; a
-		// verifier built directly against a dedicated key set does not go
-		// through that path, so it must be set explicitly here or go-oidc
-		// silently falls back to RS256 only.
-		if len(signingAlgs) > 0 {
-			bearerCfg.SupportedSigningAlgs = signingAlgs
-		}
 		bearerVerifier = oidc.NewVerifier(cfg.Issuer, oidc.NewRemoteKeySet(ctx, jwksURL), bearerCfg)
 	} else {
 		bearerVerifier = provider.Verifier(bearerCfg)

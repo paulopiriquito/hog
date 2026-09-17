@@ -14,6 +14,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY mkdocs.yml .
 COPY docs/ docs/
+# No .git in this stage, so the git-history dates plugin would warn on every
+# page and --strict would fail the build. Link and nav checking stays on.
+# GitPython raises at import when there is no git binary, before the plugin's
+# own enabled flag is ever read, so it is silenced as well.
+ENV MKDOCS_GIT_DATES=false \
+    GIT_PYTHON_REFRESH=quiet
 RUN mkdocs build --strict -d /out
 
 FROM ${BASE}

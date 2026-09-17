@@ -300,16 +300,20 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 		mws := append([]chain.Middleware{}, chain.Skeleton(logger, gates, obs)...)
 		mws = append(mws, reqMW...)
 		mws = append(mws, respMW...)
-		if issueMW != nil {
-			forwards, err := handlerForwardsIdentity(rt.Handler.Config)
-			if err != nil {
-				return nil, fmt.Errorf("route %q: forwardIdentity: %w", rt.Name, err)
+		forwards, err := handlerForwardsIdentity(rt.Handler.Config)
+		if err != nil {
+			return nil, fmt.Errorf("route %q: forwardIdentity: %w", rt.Name, err)
+		}
+		if forwards {
+			if issueMW == nil {
+				// Without an issuer nothing mints the header and nothing strips it,
+				// so the only value the backend could receive is one the client sent.
+				// Refuse the configuration rather than forward a spoofed identity.
+				return nil, fmt.Errorf("route %q: the handler sets forwardIdentity but the gateway configures no identity.assertion.issue, so the only assertion a backend could receive is one supplied by the client", rt.Name)
 			}
-			if forwards {
-				// Runs closest to the terminal handler: it mints from the principal
-				// the gates above resolved, right before the request leaves for the backend.
-				mws = append(mws, issueMW)
-			}
+			// Runs closest to the terminal handler: it mints from the principal
+			// the gates above resolved, right before the request leaves for the backend.
+			mws = append(mws, issueMW)
 		}
 		mux.Handle(rt.Match, chain.Compose(terminal, mws...))
 	}

@@ -178,7 +178,7 @@
           "properties": {
             "redirect": {
               "type": "string",
-              "description": "Same-origin path an authorization denial redirects to (302) on app routes, e.g. /utils/overview. Must start with \"/\" and must not start with \"//\" or \"/\\\", or contain \"://\" — validated at config load."
+              "description": "Same-origin path an authorization denial redirects to (302) on app routes, e.g. /no-access. Must start with \"/\" and must not start with \"//\" or \"/\\\", or contain \"://\" — validated at config load."
             }
           }
         }

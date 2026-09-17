@@ -1,7 +1,7 @@
 # HOG
 
-[![tests](https://github.com/paulopiriquito/hog/v2/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/v2/actions/workflows/tests.yml)
-[![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/v2/releases)
+[![tests](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml)
+[![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/releases)
 [![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 

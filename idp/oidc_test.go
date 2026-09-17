@@ -368,6 +368,28 @@ func TestVerifyAccessTokenRequireAudienceFalseAcceptsNoAudience(t *testing.T) {
 // go-oidc silently defaulted to RS256-only. An explicit bearer.signingAlgs
 // must reach the verifier: restricting to ES256 must now reject a token
 // signed with the fake's RS256 access key, proving the field is honoured.
+// TestVerifyAccessTokenSigningAlgsWithoutDedicatedKeySet covers the path where
+// the provider advertises no dedicated access-token key set, so the verifier is
+// built by provider.Verifier. That helper fills SupportedSigningAlgs from the
+// discovery document, which silently overrode an explicit bearer.signingAlgs
+// until it was set before the verifier is built.
+func TestVerifyAccessTokenSigningAlgsWithoutDedicatedKeySet(t *testing.T) {
+	f := newFakeIdPNoAccessJWKS(t, "client-1")
+	oi, err := newOIDC(context.Background(), oidcConfig{
+		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
+		Bearer: &bearerConfig{AudienceClaim: "client_id", SigningAlgs: []string{"ES256"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok := signRaw(t, f.priv, "test-key", map[string]any{
+		"iss": f.srv.URL, "client_id": "client-1", "exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if _, err := oi.VerifyAccessToken(context.Background(), tok); err == nil {
+		t.Fatal("an RS256 access token must be rejected when bearer.signingAlgs allows only ES256, with or without a dedicated key set")
+	}
+}
+
 func TestVerifyAccessTokenSigningAlgsExplicitOverridesDefault(t *testing.T) {
 	f := newFakeIdP(t, "client-1")
 	oi, err := newOIDC(context.Background(), oidcConfig{

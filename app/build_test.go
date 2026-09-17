@@ -2054,6 +2054,37 @@ spec:
 // value fails the build like every other handler-config decode, rather than
 // silently becoming false. echo-user's own factory ignores its config node
 // entirely, so only handlerForwardsIdentity's own decode can catch this.
+// TestBuildRejectsForwardIdentityWithoutIssuer covers the one configuration in
+// which a client could put an identity assertion in front of a backend: with no
+// identity.assertion.issue there is no middleware to mint the header and none to
+// strip it, so whatever the client sent would be forwarded verbatim.
+func TestBuildRejectsForwardIdentityWithoutIssuer(t *testing.T) {
+	reg := registry.New()
+	registerEcho(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: Route
+metadata: { name: api }
+spec:
+  match: /api/
+  type: service
+  handler: { type: echo-user, forwardIdentity: true }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Build(cfg, reg, nil)
+	if err == nil {
+		t.Fatal("want an error: forwardIdentity without identity.assertion.issue would forward a client-supplied header")
+	}
+	if !strings.Contains(err.Error(), "forwardIdentity") || !strings.Contains(err.Error(), "assertion.issue") {
+		t.Fatalf("error should name both the flag and the missing block, got: %v", err)
+	}
+}
+
 func TestBuildFailsOnUnparsableForwardIdentity(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

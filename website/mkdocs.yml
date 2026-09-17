@@ -6,7 +6,7 @@ site_author: HOG authors
 # Empty site_url keeps generated links relative, so the same build serves from
 # GitHub Pages (a project subpath) and from a cluster (served by hog-static).
 site_url: ""
-repo_url: https://github.com/paulopiriquito/hog/v2
+repo_url: https://github.com/paulopiriquito/hog
 repo_name: paulopiriquito/hog
 edit_uri: edit/v2/website/docs/
 copyright: Copyright &copy; HOG authors — Apache-2.0
@@ -94,6 +94,10 @@ plugins:
       enable_creation_date: true
       type: timeago
       fallback_to_build_date: true
+      # The docs image builds from a source copy with no .git, where this
+      # plugin warns per page and --strict turns that into a failure. The
+      # image sets MKDOCS_GIT_DATES=false; everywhere else it stays on.
+      enabled: !ENV [MKDOCS_GIT_DATES, true]
   # Page contributors (avatars) from GitHub. Only runs in CI, where a token is
   # available (MKDOCS_GIT_COMMITTERS_APIKEY); skipped locally to avoid API limits.
   - git-committers:
@@ -157,6 +161,7 @@ nav:
       - Custom plugin: examples/custom-plugin.md
   - Releases:
       - releases/index.md
+      - HOG v2.1.1: releases/v2.1.1.md
       - HOG v2.1.0: releases/v2.1.0.md
       - HOG v2.0.0: releases/v2.0.0.md
       - Migrating from v1: releases/migrating-from-v1.md

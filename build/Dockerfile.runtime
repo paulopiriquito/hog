@@ -15,7 +15,7 @@ RUN apk add --no-cache ca-certificates tzdata \
 COPY --from=build /out/hog /usr/local/bin/hog
 # busybox /bin/sh is retained for `docker exec ... sh` debugging.
 LABEL org.opencontainers.image.title="hog" \
-      org.opencontainers.image.source="https://github.com/paulopiriquito/hog/v2"
+      org.opencontainers.image.source="https://github.com/paulopiriquito/hog"
 EXPOSE 8080
 USER hog:hog
 ENTRYPOINT ["/usr/local/bin/hog", "--config", "/etc/hog"]
