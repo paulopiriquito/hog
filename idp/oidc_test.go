@@ -485,3 +485,142 @@ func TestVerifyAccessTokenWrongIssuerRejected(t *testing.T) {
 		t.Fatal("a token from another issuer must be rejected")
 	}
 }
+
+// A verification-only connector is built from the two fields verification
+// actually uses: the issuer (discovered, and checked on every token) and the
+// client ID (the expected audience). No client secret, no redirect URL.
+func TestNewOIDCVerificationOnlyNeedsOnlyIssuerAndClientID(t *testing.T) {
+	f := newFakeIdPNoAccessJWKS(t, "client-1")
+	p, err := newOIDC(context.Background(), oidcConfig{
+		Type: "oidc", Issuer: f.srv.URL, ClientID: "client-1", VerificationOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("newOIDC verificationOnly: %v", err)
+	}
+	if !IsVerificationOnly(p) {
+		t.Fatal("IsVerificationOnly = false for a verificationOnly connector")
+	}
+	// It is built to verify, so verification still works end to end.
+	id, err := p.VerifyAccessToken(context.Background(), signWith(t, f.priv, f.srv.URL, "client-1", map[string]any{"sub": "u-7"}))
+	if err != nil {
+		t.Fatalf("VerifyAccessToken on a verificationOnly connector: %v", err)
+	}
+	if id.Subject != "u-7" {
+		t.Fatalf("subject = %q, want u-7", id.Subject)
+	}
+	if _, err := p.VerifyAccessToken(context.Background(), signWith(t, f.priv, f.srv.URL, "other-client", map[string]any{})); err == nil {
+		t.Fatal("a token for another audience must still be rejected")
+	}
+}
+
+// Without the declaration, all four fields stay required — each one on its own.
+func TestNewOIDCWithoutVerificationOnlyRequiresAllFour(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	full := oidcConfig{Type: "oidc", Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "secret", RedirectURL: "https://app/cb"}
+	if _, err := newOIDC(context.Background(), full); err != nil {
+		t.Fatalf("the full four-field config must still build: %v", err)
+	}
+	for _, tc := range []struct {
+		field string
+		drop  func(c *oidcConfig)
+	}{
+		{"issuer", func(c *oidcConfig) { c.Issuer = "" }},
+		{"clientID", func(c *oidcConfig) { c.ClientID = "" }},
+		{"clientSecret", func(c *oidcConfig) { c.ClientSecret = "" }},
+		{"redirectURL", func(c *oidcConfig) { c.RedirectURL = "" }},
+	} {
+		t.Run("without "+tc.field, func(t *testing.T) {
+			c := full
+			tc.drop(&c)
+			if _, err := newOIDC(context.Background(), c); err == nil {
+				t.Fatalf("want an error when %s is missing and verificationOnly is not set", tc.field)
+			}
+		})
+	}
+}
+
+// Supplying a credential the connector can never spend, or a callback route it
+// never serves, is the copy-paste this feature exists to prevent: refuse it.
+func TestNewOIDCVerificationOnlyRejectsLoginFlowFields(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	base := oidcConfig{Type: "oidc", Issuer: f.srv.URL, ClientID: "client-1", VerificationOnly: true}
+	withSecret := base
+	withSecret.ClientSecret = "secret"
+	if _, err := newOIDC(context.Background(), withSecret); err == nil {
+		t.Fatal("want an error for verificationOnly + clientSecret")
+	}
+	withRedirect := base
+	withRedirect.RedirectURL = "https://app/cb"
+	if _, err := newOIDC(context.Background(), withRedirect); err == nil {
+		t.Fatal("want an error for verificationOnly + redirectURL")
+	}
+	noClientID := base
+	noClientID.ClientID = ""
+	if _, err := newOIDC(context.Background(), noClientID); err == nil {
+		t.Fatal("want an error for verificationOnly without a clientID")
+	}
+	noIssuer := base
+	noIssuer.Issuer = ""
+	if _, err := newOIDC(context.Background(), noIssuer); err == nil {
+		t.Fatal("want an error for verificationOnly without an issuer")
+	}
+}
+
+// Every entry point into the authorization-code flow refuses out loud, rather
+// than handing back an authorization URL with no redirect_uri.
+func TestVerificationOnlyRefusesTheLoginFlow(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	p, err := newOIDC(context.Background(), oidcConfig{
+		Type: "oidc", Issuer: f.srv.URL, ClientID: "client-1", VerificationOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("AuthCodeURL panics", func(t *testing.T) {
+		defer func() {
+			v := recover()
+			if v == nil {
+				t.Fatal("AuthCodeURL must panic on a verificationOnly connector, not return a URL")
+			}
+			msg, _ := v.(string)
+			if !strings.Contains(msg, "verificationOnly") || !strings.Contains(msg, "login flow") {
+				t.Fatalf("panic message = %v; want it to name verificationOnly and the login flow", v)
+			}
+		}()
+		_ = p.AuthCodeURL("state", "nonce", "verifier")
+	})
+
+	if _, _, err := p.Exchange(context.Background(), "code", "verifier", "nonce"); err == nil ||
+		!strings.Contains(err.Error(), "verificationOnly") {
+		t.Fatalf("Exchange error = %v; want a refusal naming verificationOnly", err)
+	}
+	if _, err := p.Refresh(context.Background(), "refresh-token"); err == nil ||
+		!strings.Contains(err.Error(), "verificationOnly") {
+		t.Fatalf("Refresh error = %v; want a refusal naming verificationOnly", err)
+	}
+	// There is no provider session to end, so RP-initiated logout is unsupported —
+	// even though the fake IdP advertises an end_session_endpoint.
+	if u, ok := p.LogoutURL("hint", "https://app/"); ok || u != "" {
+		t.Fatalf("LogoutURL = %q, %v; want unsupported", u, ok)
+	}
+}
+
+// A full connector keeps the behaviour it has today: IsVerificationOnly is
+// false and the login flow works.
+func TestFullConnectorIsNotVerificationOnly(t *testing.T) {
+	f := newFakeIdP(t, "client-1")
+	p := buildOIDC(t, f)
+	if IsVerificationOnly(p) {
+		t.Fatal("a connector that does not declare verificationOnly must not report as one")
+	}
+	if !strings.Contains(p.AuthCodeURL("s", "n", "v"), "redirect_uri=") {
+		t.Fatal("a full connector must still produce an authorization URL with a redirect_uri")
+	}
+}
+
+func TestIsVerificationOnlyNil(t *testing.T) {
+	if IsVerificationOnly(nil) {
+		t.Fatal("a nil IdP is not verification-only")
+	}
+}

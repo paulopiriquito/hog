@@ -2285,3 +2285,94 @@ spec:
 		t.Fatalf("route without forwardIdentity must not forward an assertion under either name, got %+v", gotNo)
 	}
 }
+
+// A verification-only IdP is the second instance of a two-instance deployment:
+// it verifies Bearer access tokens the first instance obtained, holds no client
+// secret, serves no callback, and mounts no auth endpoints.
+func TestBuildVerificationOnlyIdPWithoutSession(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+fakeIssuer(t)+`, clientID: c, verificationOnly: true }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := Build(cfg, reg, nil)
+	if err != nil {
+		t.Fatalf("Build with a verificationOnly IdP: %v", err)
+	}
+	if a.IdP == nil {
+		t.Fatal("App.IdP not set")
+	}
+	if !idp.IsVerificationOnly(a.IdP) {
+		t.Fatal("the built IdP does not report itself verification-only")
+	}
+	rec := httptest.NewRecorder()
+	a.Handler.ServeHTTP(rec, httptest.NewRequest("GET", "/auth/login", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("/auth/login on a verification-only gateway = %d, want 404", rec.Code)
+	}
+}
+
+// A session says this gateway logs users in; a verification-only IdP says it
+// cannot. Nothing else issues a session cookie, so the pair is a login flow
+// that can never run: refuse it at build time.
+func TestBuildRejectsVerificationOnlyIdPWithSession(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec:
+  session:
+    key: "0123456789abcdef0123456789abcdef"
+  auth:
+    loginPath: /auth/login
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+fakeIssuer(t)+`, clientID: c, verificationOnly: true }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Build(cfg, reg, nil)
+	if err == nil {
+		t.Fatal("want an error for a verificationOnly IdP on a gateway that also configures a session")
+	}
+	if !strings.Contains(err.Error(), "verificationOnly") || !strings.Contains(err.Error(), "session") {
+		t.Fatalf("error = %v; want it to name verificationOnly and the session", err)
+	}
+}
+
+// The connector itself refuses the credentials a verification-only instance
+// would never spend, and the refusal surfaces through the build.
+func TestBuildRejectsVerificationOnlyIdPWithClientSecret(t *testing.T) {
+	reg := registry.New()
+	terminal.Register(reg)
+	idp.Register(reg)
+	cfg, err := Parse(mustDecode(t, `
+kind: Gateway
+metadata: { name: hog }
+spec: {}
+---
+kind: IdP
+metadata: { name: corp }
+spec: { type: oidc, issuer: `+fakeIssuer(t)+`, clientID: c, clientSecret: s, verificationOnly: true }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(cfg, reg, nil); err == nil {
+		t.Fatal("want an error for verificationOnly combined with a clientSecret")
+	}
+}

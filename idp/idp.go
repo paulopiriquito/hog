@@ -25,6 +25,26 @@ type Identity struct {
 	Claims  map[string]any // full claim set, for downstream projection (#3)
 }
 
+// VerificationOnly is the optional interface a connector implements when it can
+// only verify tokens another party issued — it holds no client secret and no
+// redirect URL, so it can never start a login flow. It is deliberately separate
+// from IdP: a connector that does not implement it is a full connector, and no
+// existing implementation has to change.
+//
+// IsVerificationOnly is the safe way to ask.
+type VerificationOnly interface {
+	// VerificationOnly reports whether the connector is verification-only.
+	VerificationOnly() bool
+}
+
+// IsVerificationOnly reports whether p is a verification-only connector: one
+// that verifies tokens but cannot run the authorization-code flow. A nil p, or
+// one that does not implement VerificationOnly, is not.
+func IsVerificationOnly(p IdP) bool {
+	v, ok := p.(VerificationOnly)
+	return ok && v.VerificationOnly()
+}
+
 // IdP is the external identity-provider connector.
 type IdP interface {
 	AuthCodeURL(state, nonce, codeVerifier string) string

@@ -167,6 +167,17 @@ func Build(cfg Config, reg *registry.Registry, logger *slog.Logger) (*App, error
 	if err != nil {
 		return nil, err
 	}
+	// A verification-only IdP cannot run the authorization-code flow, and the
+	// callback of that flow is the only thing in HOG that ever issues a session
+	// cookie. So a session block on this gateway describes a login that can
+	// never happen: no login, callback or logout endpoint would be mounted, and
+	// every protected app route would redirect to a path that 404s. Refuse the
+	// pair at build time instead of booting a gateway whose login is a dead end.
+	// (The `auth` block alone is not part of this: without a session it is inert
+	// for any configuration, verification-only or not.)
+	if sess != nil && idp.IsVerificationOnly(active) {
+		return nil, fmt.Errorf("the IdP is declared verificationOnly but the gateway also configures a session: a verification-only IdP cannot run the login flow that issues the session cookie, so no login, callback or logout endpoint can be mounted. Remove the session block to run this instance as a token-verifying gateway, or give the IdP a clientSecret and redirectURL and drop verificationOnly")
+	}
 	// Identity resolution gates. SessionGate is nil-safe (pass-through when no
 	// cookie manager); the Bearer gate is available whenever an IdP is configured.
 	sessionGate := auth.SessionGate(sess)

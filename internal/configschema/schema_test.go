@@ -174,6 +174,49 @@ spec:
       - staff
 `,
 		},
+		{
+			name: "IdP without verificationOnly still needs clientSecret and redirectURL",
+			yaml: `
+apiVersion: hog.dev/v1
+kind: IdP
+metadata:
+  name: corp
+spec:
+  type: oidc
+  issuer: https://idp.example.com
+  clientID: hog-example
+`,
+		},
+		{
+			name: "verification-only IdP may not carry a clientSecret",
+			yaml: `
+apiVersion: hog.dev/v1
+kind: IdP
+metadata:
+  name: corp
+spec:
+  type: oidc
+  verificationOnly: true
+  issuer: https://idp.example.com
+  clientID: hog-example
+  clientSecret: ${OIDC_CLIENT_SECRET}
+`,
+		},
+		{
+			name: "verification-only IdP may not carry a redirectURL",
+			yaml: `
+apiVersion: hog.dev/v1
+kind: IdP
+metadata:
+  name: corp
+spec:
+  type: oidc
+  verificationOnly: true
+  issuer: https://idp.example.com
+  clientID: hog-example
+  redirectURL: https://api.example.com/auth/callback
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -187,6 +230,31 @@ spec:
 				t.Fatalf("expected schema validation to fail, but it passed")
 			}
 		})
+	}
+}
+
+// A verification-only IdP validates with just the two fields verification uses.
+func TestVerificationOnlyIdPValidates(t *testing.T) {
+	sch := compileSchema(t)
+	const doc = `
+apiVersion: hog.dev/v1
+kind: IdP
+metadata:
+  name: corp
+spec:
+  type: oidc
+  verificationOnly: true
+  issuer: https://idp.example.com
+  clientID: hog-example
+  bearer:
+    audienceClaim: client_id
+`
+	var v any
+	if err := yaml.Unmarshal([]byte(doc), &v); err != nil {
+		t.Fatalf("yaml unmarshal: %v", err)
+	}
+	if err := sch.Validate(toJSONCompatible(t, v)); err != nil {
+		t.Fatalf("verification-only IdP rejected by the schema: %v", err)
 	}
 }
 

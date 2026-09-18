@@ -412,8 +412,8 @@
     "idpOIDC": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "issuer", "clientID", "clientSecret", "redirectURL"],
-      "description": "Built-in OIDC connector config (IdP.spec.type: oidc).",
+      "required": ["type", "issuer", "clientID"],
+      "description": "Built-in OIDC connector config (IdP.spec.type: oidc). issuer and clientID are always required. clientSecret and redirectURL are required for a connector that logs users in, and rejected for one declared `verificationOnly: true`.",
       "properties": {
         "type": { "type": "string", "const": "oidc" },
         "issuer": {
@@ -426,11 +426,15 @@
         },
         "clientSecret": {
           "type": "string",
-          "description": "The registered OAuth2 client secret. Required."
+          "description": "The registered OAuth2 client secret. Required, unless verificationOnly is true — which rejects it, since a connector that never exchanges an authorization code can never use it."
         },
         "redirectURL": {
           "type": "string",
-          "description": "Must match a redirect URI registered with the provider. Its path becomes HOG's callback route automatically. Required."
+          "description": "Must match a redirect URI registered with the provider. Its path becomes HOG's callback route automatically. Required, unless verificationOnly is true — which rejects it, since such an instance serves no callback route."
+        },
+        "verificationOnly": {
+          "type": "boolean",
+          "description": "Declares an identity provider that exists only to verify access tokens another party issued — the instance in front of the APIs, in a deployment that runs one instance for login and another for verification. It mounts no login, logout or callback route, so it needs only issuer (discovery finds the key set, and the issuer is checked on every token) and clientID (the expected audience); clientSecret and redirectURL are rejected rather than ignored, so no credential is copied into a workload that cannot spend it. Defaults to false. A gateway that also configures `session` is refused at startup: a verification-only IdP cannot run the login flow that issues the session cookie."
         },
         "bearerAudience": {
           "type": "string",
@@ -467,7 +471,14 @@
           "type": "boolean",
           "description": "Use PKCE (S256 code challenge) on the authorization code exchange. Defaults to true."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "verificationOnly": { "const": true } }, "required": ["verificationOnly"] },
+          "then": { "properties": { "clientSecret": false, "redirectURL": false } },
+          "else": { "required": ["clientSecret", "redirectURL"] }
+        }
+      ]
     },
     "idpSpec": {
       "type": "object",

@@ -12,15 +12,20 @@ import (
 
 // oidcConfig is the decoded `kind: IdP` spec.
 type oidcConfig struct {
-	Type           string        `yaml:"type"`
-	Issuer         string        `yaml:"issuer"`
-	ClientID       string        `yaml:"clientID"`
-	ClientSecret   string        `yaml:"clientSecret"`
-	RedirectURL    string        `yaml:"redirectURL"`
-	BearerAudience string        `yaml:"bearerAudience"`
-	Bearer         *bearerConfig `yaml:"bearer"`
-	Scopes         []string      `yaml:"scopes"`
-	PKCE           *bool         `yaml:"pkce"`
+	Type         string `yaml:"type"`
+	Issuer       string `yaml:"issuer"`
+	ClientID     string `yaml:"clientID"`
+	ClientSecret string `yaml:"clientSecret"`
+	RedirectURL  string `yaml:"redirectURL"`
+	// VerificationOnly declares a connector that only verifies tokens another
+	// party issued: it never runs the authorization-code flow, so it needs no
+	// client secret and no redirect URL. It is always explicit in the config —
+	// never inferred from the absence of a session block.
+	VerificationOnly bool          `yaml:"verificationOnly"`
+	BearerAudience   string        `yaml:"bearerAudience"`
+	Bearer           *bearerConfig `yaml:"bearer"`
+	Scopes           []string      `yaml:"scopes"`
+	PKCE             *bool         `yaml:"pkce"`
 }
 
 // bearerConfig tunes how Authorization: Bearer access tokens are verified. Some
@@ -43,9 +48,30 @@ type oidcIdP struct {
 	endSession       string
 	provider         *oidc.Provider
 	pkce             bool
+	verifyOnly       bool
+}
+
+// VerificationOnly implements idp.VerificationOnly: it reports whether this
+// connector was declared `verificationOnly: true`, and so can only verify
+// tokens another party issued.
+func (o *oidcIdP) VerificationOnly() bool { return o.verifyOnly }
+
+// errVerificationOnly is the refusal every login-flow entry point returns
+// (or, where the signature has no error to return, panics with).
+func errVerificationOnly(what string) error {
+	return fmt.Errorf("oidc: the IdP is declared verificationOnly, so it cannot %s: it holds no client secret and no redirect URL. Point logins at the instance that terminates the session, or remove verificationOnly from the IdP resource", what)
 }
 
 func (o *oidcIdP) AuthCodeURL(state, nonce, codeVerifier string) string {
+	// AuthCodeURL has no error to return, and the alternatives — an authorization
+	// URL with an empty redirect_uri, or a nil dereference — both fail quietly at
+	// the provider instead of here. A configured gateway can never reach this:
+	// app.Build refuses a verificationOnly IdP alongside a session, so no login
+	// endpoint is ever mounted against one. This catches the framework-mode caller
+	// that wires the auth handlers by hand.
+	if o.verifyOnly {
+		panic(errVerificationOnly("start a login flow").Error())
+	}
 	opts := []oauth2.AuthCodeOption{oauth2.AccessTypeOffline, oidc.Nonce(nonce)}
 	if o.pkce {
 		opts = append(opts, oauth2.S256ChallengeOption(codeVerifier))
@@ -56,6 +82,9 @@ func (o *oidcIdP) AuthCodeURL(state, nonce, codeVerifier string) string {
 func (o *oidcIdP) UsesPKCE() bool { return o.pkce }
 
 func (o *oidcIdP) Exchange(ctx context.Context, code, codeVerifier, nonce string) (*Tokens, *Identity, error) {
+	if o.verifyOnly {
+		return nil, nil, errVerificationOnly("exchange an authorization code")
+	}
 	if nonce == "" {
 		return nil, nil, errors.New("oidc: nonce must not be empty")
 	}
@@ -96,6 +125,9 @@ func identityFrom(idt *oidc.IDToken) (*Identity, error) {
 }
 
 func (o *oidcIdP) Refresh(ctx context.Context, refreshToken string) (*Tokens, error) {
+	if o.verifyOnly {
+		return nil, errVerificationOnly("refresh a token")
+	}
 	src := o.oauth2.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken})
 	tok, err := src.Token()
 	if err != nil {
@@ -164,6 +196,12 @@ func claimHas(v any, want string) bool {
 }
 
 func (o *oidcIdP) LogoutURL(idTokenHint, postLogoutRedirect string) (string, bool) {
+	// A verification-only instance never established a session with the provider,
+	// so it has none to end: report RP-initiated logout as unsupported, the same
+	// answer as a provider that advertises no end_session_endpoint.
+	if o.verifyOnly {
+		return "", false
+	}
 	if o.endSession == "" {
 		return "", false
 	}
@@ -195,9 +233,25 @@ func (o *oidcIdP) UserInfo(ctx context.Context, accessToken string) (map[string]
 }
 
 // newOIDC performs eager discovery (fail-fast) and builds the connector.
+//
+// A full connector — one that logs users in — needs all four of issuer,
+// clientID, clientSecret and redirectURL. A `verificationOnly: true` connector
+// only verifies tokens another party issued, so it needs just the two that
+// verification actually uses: the issuer (discovery finds the key set, and the
+// issuer is checked on every token) and the clientID (the expected audience).
+// Carrying the other two would copy a credential into a workload that can never
+// spend it, and name a callback route that workload does not serve, so they are
+// refused rather than ignored.
 func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
-	if cfg.Issuer == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "" {
-		return nil, fmt.Errorf("oidc: issuer, clientID, clientSecret and redirectURL are required")
+	if cfg.VerificationOnly {
+		if cfg.Issuer == "" || cfg.ClientID == "" {
+			return nil, fmt.Errorf("oidc: verificationOnly requires issuer and clientID (the issuer is discovered and checked on every token, the clientID is the expected audience)")
+		}
+		if cfg.ClientSecret != "" || cfg.RedirectURL != "" {
+			return nil, fmt.Errorf("oidc: verificationOnly cannot be combined with clientSecret or redirectURL: a verification-only IdP never runs the authorization-code flow, so neither is ever used — remove them, or remove verificationOnly")
+		}
+	} else if cfg.Issuer == "" || cfg.ClientID == "" || cfg.ClientSecret == "" || cfg.RedirectURL == "" {
+		return nil, fmt.Errorf("oidc: issuer, clientID, clientSecret and redirectURL are required (an IdP that only verifies tokens other parties issued can set verificationOnly: true and supply just issuer and clientID)")
 	}
 	scopes := cfg.Scopes
 	if len(scopes) == 0 {
@@ -278,5 +332,6 @@ func newOIDC(ctx context.Context, cfg oidcConfig) (IdP, error) {
 		endSession:       disco.EndSession,
 		provider:         provider,
 		pkce:             pkce,
+		verifyOnly:       cfg.VerificationOnly,
 	}, nil
 }
