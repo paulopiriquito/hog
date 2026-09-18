@@ -17,6 +17,11 @@ If `session` is configured without an `IdP`, HOG logs a startup warning and
 serves protected routes' redirect behavior without the login/callback/logout
 endpoints actually existing — fix this by adding the `IdP` resource.
 
+An instance that never logs anyone in — one that only verifies a Bearer
+access token another party obtained — needs the `IdP` resource and nothing
+else here. See
+[an instance that only verifies tokens](#an-instance-that-only-verifies-tokens).
+
 ## 1. Configure the IdP connector
 
 ```yaml
@@ -37,8 +42,9 @@ spec:
 | `type` | string | — | `oidc` (the only built-in connector). |
 | `issuer` | string | — | **Required.** OIDC discovery issuer URL. HOG performs discovery at startup — a bad issuer fails the boot fast. |
 | `clientID` | string | — | **Required.** |
-| `clientSecret` | string | — | **Required.** Use `${ENV}` — never commit it. |
-| `redirectURL` | string | — | **Required.** Must match what the IdP is configured to redirect back to. Its **path** becomes HOG's callback endpoint (default `/auth/callback` if it can't be parsed). |
+| `clientSecret` | string | — | **Required**, unless `verificationOnly`. Use `${ENV}` — never commit it. |
+| `redirectURL` | string | — | **Required**, unless `verificationOnly`. Must match what the IdP is configured to redirect back to. Its **path** becomes HOG's callback endpoint (default `/auth/callback` if it can't be parsed). |
+| `verificationOnly` | bool | `false` | Declares an IdP that only **verifies** access tokens someone else issued. It needs just `issuer` and `clientID`, runs no login flow, and **rejects** `clientSecret` and `redirectURL`. See [an instance that only verifies tokens](#an-instance-that-only-verifies-tokens). |
 | `bearerAudience` | string | `clientID` | Expected `aud` for verifying `Authorization: Bearer` access tokens (see [API bearer auth](#api-clients-bearer-tokens) below). |
 | `bearer.jwksURL` | string | discovery's `jwks_access_token_uri`, else `jwks_uri` | Key set used to verify `Authorization: Bearer` access tokens, for a provider that signs them with a key set other than the ID token's. |
 | `bearer.audienceClaim` | string | — (checks `aud`) | Claim compared against `bearerAudience` instead of the standard `aud` (e.g. `client_id`). |
@@ -194,13 +200,62 @@ may use, defaulting to whatever the discovery document advertises for ID
 tokens. See the [configuration reference](configuration.md#gateway-identity)
 for the full `identity.subjectClaim` field description.
 
+### An instance that only verifies tokens
+
+A deployment can split the two jobs across two HOG instances: one terminates
+the OIDC session — it runs the authorization-code flow, holds the cookie and
+refreshes the access token — while a second sits in front of the APIs and
+only ever *verifies* a Bearer access token the first one obtained. The second
+declares no `session`, so it mounts no login, logout or callback route and
+never performs a code exchange.
+
+Both still need an `IdP`: verifying a token means discovering the provider's
+key set and checking the token's issuer. Only the first needs to be able to
+log anyone in, and `verificationOnly: true` says so:
+
+```yaml
+kind: IdP
+metadata: { name: corp-oidc }
+spec:
+  type: oidc
+  verificationOnly: true          # verifies tokens; never starts a login flow
+  issuer: https://idp.example.com # discovery finds the key set; every token is checked against it
+  clientID: ${OIDC_CLIENT_ID}     # the expected audience
+```
+
+That is the whole resource. `clientSecret` and `redirectURL` are not merely
+optional here — they are **rejected**, because a connector that never
+exchanges an authorization code can never use the secret, and an instance
+that mounts no callback route should not name one. So the verifying instance
+needs no copy of the client secret in its secret store at all; see
+[give each instance only the credentials it uses](security.md#give-each-instance-only-the-credentials-it-uses).
+
+Everything on the verification side is unchanged: `bearerAudience`, the
+`bearer:` block, `identity.subjectClaim`, group derivation, route
+`access`/`authorize`, and both directions of the identity assertion below all
+work exactly as they do on a full instance. Only the login flow is absent.
+
+Two configurations are refused at startup rather than left half-working:
+
+| Configuration | Why it fails |
+|---|---|
+| `verificationOnly: true` together with `clientSecret` or `redirectURL` | Neither is ever used, so accepting them would copy a credential into a workload that cannot spend it and name a route it does not serve. |
+| `verificationOnly: true` on a gateway that also configures `session` | The login flow's callback is the only thing in HOG that issues a session cookie. The two together describe a login that can never happen: no login, callback or logout endpoint would be mounted, and every protected `app` route would redirect to a path that 404s. |
+
+The declaration is always explicit. HOG never infers it from a missing
+`session` block — adding a session to an existing config must not silently
+change what its `IdP` resource means. An `IdP` that does not set the field
+behaves exactly as before: all four of `issuer`, `clientID`, `clientSecret`
+and `redirectURL` remain required.
+
 ### Handing identity to a second HOG instance
 
 A front HOG instance — the one that terminated the browser session or
 verified the Bearer token — can mint a signed statement of the principal it
 resolved and attach it to a proxied request, so a second HOG instance behind
 it can trust that identity without resolving it against the IdP a second
-time:
+time — that second instance's own `IdP` is usually a verification-only one,
+as above:
 
 ```yaml
 # front instance: mints on the way out

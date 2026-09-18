@@ -91,6 +91,18 @@ separation is what lets HOG run as a pure, cookieless API gateway — Bearer
 only, no session cookie, no login endpoints — using the same
 identity-projection rules a full BFF deployment uses.
 
+An instance in that shape still needs an `IdP`, because verification is a
+protocol operation: discovery resolves the key set and every token is checked
+against the issuer. But it needs only the parts verification uses, and
+`verificationOnly: true` narrows the resource to exactly those — the issuer
+and the client id, which is the expected audience. The credential of the
+authorization-code flow is then not merely unused but refused, so a
+deployment that runs one instance for login and another for verification
+keeps the client secret in the one that performs the exchange. Declaring it
+is deliberate rather than inferred from the missing `session` block: adding a
+session later must change what a configuration does, not what its existing
+`IdP` resource already meant.
+
 ## Pluggable session state
 
 The session cookie's contents depend on which state provider is configured:

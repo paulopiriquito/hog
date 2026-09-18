@@ -56,6 +56,30 @@ Either way, the cluster stays coordination-free: adding a state provider adds
 a shared backend for sessions, not a shared control plane for the gateway
 itself.
 
+## Splitting login from verification
+
+The replicas above are identical to each other, but a deployment can also run
+two *different* HOG configurations side by side: one instance in front of the
+browser, terminating the OIDC session — it runs the authorization-code flow,
+holds the cookie and refreshes the access token — and a second in front of
+the APIs, which only verifies the Bearer access token the first obtained (and
+accepts an [identity
+assertion](../operations/authentication.md#handing-identity-to-a-second-hog-instance)
+from it on a proxied hop).
+
+The two instances need different credentials, and the configuration says so.
+The verifying instance declares no `session`, so it mounts no login, logout
+or callback route and never performs a code exchange; its `IdP` declares
+`verificationOnly: true` and carries only the issuer and the client ID —
+neither a client secret nor a redirect URL, since it would use neither. That
+keeps the OAuth client secret in the one workload that actually spends it,
+rather than in the one exposed to all the platform's API traffic. See
+[an instance that only verifies
+tokens](../operations/authentication.md#an-instance-that-only-verifies-tokens).
+
+Each instance still scales to N stateless replicas on its own terms; only the
+session-terminating one has session state to think about.
+
 ## Container images
 
 HOG ships as a small set of Docker build stages:

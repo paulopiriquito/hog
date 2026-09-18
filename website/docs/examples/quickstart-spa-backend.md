@@ -259,7 +259,10 @@ before proxying, and HOG rewrites the request before it reaches
 - **`session.key`** must be exactly 32 bytes (AES-256); `session.ttl`
   defaults to `8h` if omitted.
 - **The OIDC env vars and `redirectURL`** — `issuer`, `clientID`,
-  `clientSecret`, and `redirectURL` are all required for `kind: IdP`. The
+  `clientSecret`, and `redirectURL` are all required for a `kind: IdP` that
+  logs users in, as this one does (an IdP declared
+  [`verificationOnly`](../operations/authentication.md#an-instance-that-only-verifies-tokens)
+  needs only the first two). The
   redirect URL's exact string (scheme, host, port, path) must match what's
   registered at the provider, or the authorization request is rejected
   before HOG ever sees a callback.

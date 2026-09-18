@@ -530,7 +530,9 @@ spec:
 
 ## Other resource kinds
 
-- `kind: IdP` — the OIDC connector. See [authentication](authentication.md).
+- `kind: IdP` — the OIDC connector. Its fields, including `verificationOnly`
+  for an instance that only verifies tokens someone else issued, are
+  documented in [authentication](authentication.md#1-configure-the-idp-connector).
 - `kind: Telemetry` — OpenTelemetry + access-log settings. See
   [observability](observability.md).
 - `kind: RequestPlugin` / `kind: ResponsePlugin` — third-party middleware
@@ -745,6 +747,14 @@ metadata:
 spec:
   # Only "oidc" is built in today.
   type: oidc
+  # Set verificationOnly: true on an instance that ONLY verifies access tokens
+  # another party issued — the one in front of the APIs, in a deployment that
+  # runs one instance for login and another for verification. It mounts no
+  # login, logout or callback route, so it needs just issuer and clientID, and
+  # clientSecret/redirectURL are then rejected rather than ignored — the client
+  # secret never has to be copied into that workload. Commented out here
+  # because this example configures a session, which such an IdP cannot serve.
+  # verificationOnly: true
   # The provider's issuer URL, used for OIDC discovery
   # (<issuer>/.well-known/openid-configuration).
   issuer: https://idp.example.com

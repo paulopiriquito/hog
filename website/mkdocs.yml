@@ -161,6 +161,7 @@ nav:
       - Custom plugin: examples/custom-plugin.md
   - Releases:
       - releases/index.md
+      - HOG v2.2.0: releases/v2.2.0.md
       - HOG v2.1.1: releases/v2.1.1.md
       - HOG v2.1.0: releases/v2.1.0.md
       - HOG v2.0.0: releases/v2.0.0.md

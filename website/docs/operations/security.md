@@ -32,6 +32,34 @@ spec:
 Rotating the key invalidates every existing session (a deliberate
 trade-off — see [authentication](authentication.md#2-configure-the-session)).
 
+## Give each instance only the credentials it uses
+
+A secret is only as safe as the number of places it is stored. When a
+deployment runs one instance for login and another for verification, only the
+first performs the code exchange, so only the first needs the OAuth client
+secret — and the second is usually the one exposed to the whole platform's
+traffic. Declare its `IdP` verification-only and the secret never has to be
+copied into that workload, or into a second secret store to feed it:
+
+```yaml
+kind: IdP
+metadata: { name: corp-oidc }
+spec:
+  type: oidc
+  verificationOnly: true
+  issuer: https://idp.example.com
+  clientID: ${OIDC_CLIENT_ID}
+```
+
+HOG **rejects** `clientSecret` and `redirectURL` on such an IdP rather than
+ignoring them, so a config copied from the login instance and left unedited
+fails at startup instead of quietly carrying a credential that instance can
+never spend. The same holds for the other secrets: an instance with no
+`session` block needs no `session.key`, and only an instance that signs
+identity assertions needs an `identity.assertion.issue.key` — the accepting
+side holds the public half. See
+[an instance that only verifies tokens](authentication.md#an-instance-that-only-verifies-tokens).
+
 ## Terminate TLS at a trusted load balancer, and set `trustedProxies`
 
 HOG does not terminate TLS itself. Deploy it behind a TLS-terminating load
