@@ -2160,6 +2160,8 @@
       
         
       
+        
+      
     
     
     
@@ -2212,6 +2214,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../releases/v2.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HOG v2.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -2543,6 +2573,17 @@ configured once, in a shared identity model used by both paths. That
 separation is what lets HOG run as a pure, cookieless API gateway — Bearer
 only, no session cookie, no login endpoints — using the same
 identity-projection rules a full BFF deployment uses.</p>
+<p>An instance in that shape still needs an <code>IdP</code>, because verification is a
+protocol operation: discovery resolves the key set and every token is checked
+against the issuer. But it needs only the parts verification uses, and
+<code>verificationOnly: true</code> narrows the resource to exactly those — the issuer
+and the client id, which is the expected audience. The credential of the
+authorization-code flow is then not merely unused but refused, so a
+deployment that runs one instance for login and another for verification
+keeps the client secret in the one that performs the exchange. Declaring it
+is deliberate rather than inferred from the missing <code>session</code> block: adding a
+session later must change what a configuration does, not what its existing
+<code>IdP</code> resource already meant.</p>
 <h2 id="pluggable-session-state">Pluggable session state<a class="headerlink" href="#pluggable-session-state" title="Anchor link to this section">&para;</a></h2>
 <p>The session cookie's contents depend on which state provider is configured:</p>
 <ul>
@@ -2635,7 +2676,7 @@ configuration details.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="September 17, 2026 08:31:21 UTC"><span class="timeago" datetime="2026-09-17T08:31:21+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="September 17, 2026 08:31:21 UTC">2026-09-17</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="September 18, 2026 15:00:18 UTC"><span class="timeago" datetime="2026-09-18T15:00:18+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="September 18, 2026 15:00:18 UTC">2026-09-18</span>
   </span>
 
     

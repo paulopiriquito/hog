@@ -188,6 +188,14 @@ metadata:
 spec:
   # Only "oidc" is built in today.
   type: oidc
+  # Set verificationOnly: true on an instance that ONLY verifies access tokens
+  # another party issued — the one in front of the APIs, in a deployment that
+  # runs one instance for login and another for verification. It mounts no
+  # login, logout or callback route, so it needs just issuer and clientID, and
+  # clientSecret/redirectURL are then rejected rather than ignored — the client
+  # secret never has to be copied into that workload. Commented out here
+  # because this example configures a session, which such an IdP cannot serve.
+  # verificationOnly: true
   # The provider's issuer URL, used for OIDC discovery
   # (<issuer>/.well-known/openid-configuration).
   issuer: https://idp.example.com
