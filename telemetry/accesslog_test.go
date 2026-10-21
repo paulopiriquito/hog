@@ -73,6 +73,48 @@ func TestAccessRecorderForwardsFlush(t *testing.T) {
 	}
 }
 
+// TestAccessLogNeverLogsCredentialHeaders: configuration refuses these headers
+// at startup, but AccessLog is an exported constructor and a framework-mode
+// caller can hand it any config. The middleware is the last line, so it
+// redacts on its own.
+func TestAccessLogNeverLogsCredentialHeaders(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	cfg := AccessLogConfig{
+		Level: "info",
+		Headers: map[string]string{
+			"auth": "Authorization", "cookie": "cookie", "proxy": "Proxy-Authorization",
+			"assertion": "X-Hog-Identity", "ua": "User-Agent",
+		},
+	}
+	h := AccessLog(cfg, logger).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	req := httptest.NewRequest("GET", "http://h/x", nil)
+	req.Header.Set("Authorization", "Bearer SECRET-TOKEN")
+	req.Header.Set("Cookie", "hog_session=SECRET-COOKIE")
+	req.Header.Set("Proxy-Authorization", "Basic SECRET-PROXY")
+	req.Header.Set("X-Hog-Identity", "SECRET-ASSERTION")
+	req.Header.Set("User-Agent", "UA")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	line := buf.String()
+	if strings.Contains(line, "SECRET") {
+		t.Fatalf("a credential reached the access log: %s", line)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &rec); err != nil {
+		t.Fatalf("log not JSON: %v (%s)", err, line)
+	}
+	for _, field := range []string{"auth", "cookie", "proxy", "assertion"} {
+		if rec[field] != "REDACTED" {
+			t.Errorf("field %q = %v, want REDACTED so the configuration visibly took effect", field, rec[field])
+		}
+	}
+	if rec["ua"] != "UA" {
+		t.Errorf("a harmless header must still be captured: ua = %v", rec["ua"])
+	}
+}
+
 func TestAccessLogRedactsSensitiveQuery(t *testing.T) {
 	if got := redactQuery("code=SECRET&page=2&api_key=K"); strings.Contains(got, "SECRET") || strings.Contains(got, "K") {
 		t.Fatalf("query not redacted: %q", got)
