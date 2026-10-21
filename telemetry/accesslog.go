@@ -38,7 +38,7 @@ func AccessLog(cfg AccessLogConfig, logger *slog.Logger) chain.Middleware {
 			}
 			for field, header := range headers {
 				if v := r.Header.Get(header); v != "" {
-					attrs = append(attrs, slog.String(field, v))
+					attrs = append(attrs, slog.String(field, redactHeader(header, v)))
 				}
 			}
 			for field, v := range fields {
@@ -108,6 +108,32 @@ func accessLogClientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// credentialHeaders are request headers that carry a credential or a session
+// in the clear: the HTTP authentication and cookie headers, and the signed
+// identity assertion one HOG instance hands to another. Configuration refuses
+// them under accessLog.headers at startup, and the middleware refuses them
+// again at the logging site, so a configuration assembled in code rather than
+// loaded from YAML cannot route a bearer token into the log either.
+var credentialHeaders = map[string]bool{
+	"authorization": true, "proxy-authorization": true, "cookie": true, "set-cookie": true,
+	"x-hog-identity": true,
+}
+
+// isCredentialHeader reports whether header may never be captured by the
+// access log, whatever name it was configured under.
+func isCredentialHeader(header string) bool { return credentialHeaders[strings.ToLower(header)] }
+
+// redactHeader returns what the access log may record for header: the value
+// itself, or "REDACTED" for a credential header. The field is still emitted,
+// so the configuration visibly took effect and the omission is deliberate
+// rather than silent.
+func redactHeader(header, value string) string {
+	if isCredentialHeader(header) {
+		return "REDACTED"
+	}
+	return value
 }
 
 // sensitiveParams are query keys whose values are redacted in the access log.

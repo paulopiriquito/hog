@@ -39,7 +39,7 @@ framework-mode consumer depends on.
 
 ## Conventions
 
-- **Go 1.26**, no exceptions — check `go.mod` before assuming a newer or
+- **Go 1.27**, no exceptions — check `go.mod` before assuming a newer or
   older language feature is available.
 - **Standard-library-first.** `net/http`, `log/slog`, `os.Root`, and friends
   are preferred over a dependency. The current dependency list is

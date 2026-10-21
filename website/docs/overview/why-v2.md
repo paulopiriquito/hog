@@ -2,7 +2,7 @@
 
 HOG v1 was a fork of KrakenD-CE. HOG v2 is a **clean-room rewrite**: no v1
 code is reused — not the fork's packages, not its plugin logic, not the
-KrakenD-derived core. v2 is built fresh, from the Go 1.26 standard library
+KrakenD-derived core. v2 is built fresh, from the Go 1.27 standard library
 up, against its own architecture. v1 remains useful only as a reference for
 requirements and observed behavior (the BFF cookie flow, static serving with
 auth, trace correlation) — never as a source of code to port.

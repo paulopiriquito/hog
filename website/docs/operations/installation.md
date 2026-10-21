@@ -28,7 +28,7 @@ pullable image. You never need to build or pull the layer underneath the
 one you use.
 
 ```
-hog-builder  (FROM golang:1.26-alpine)
+hog-builder  (FROM golang:1.27-alpine)
       │  hog source + compiled `hog-build`
       ▼
 hog-runtime  (FROM alpine:3.21)

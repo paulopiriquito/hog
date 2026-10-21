@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -92,9 +93,7 @@ func (i *AssertionIssuer) Mint(p *session.Principal) (string, error) {
 	var passport map[string]any
 	if p.Passport != nil {
 		passport = make(map[string]any, len(p.Passport))
-		for k, v := range p.Passport {
-			passport[k] = v
-		}
+		maps.Copy(passport, p.Passport)
 	}
 	claims := IdentityAssertion{
 		Issuer:    i.name,

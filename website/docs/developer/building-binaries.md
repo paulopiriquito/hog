@@ -76,7 +76,7 @@ the replace target exists when the build runs.
 ## The two-stage Dockerfile
 
 A custom-plugin image is a two-stage build: `hog-builder` composes the
-binary, `hog-runtime` serves it. `hog-builder` (`FROM golang:1.26-alpine`)
+binary, `hog-runtime` serves it. `hog-builder` (`FROM golang:1.27-alpine`)
 carries the `hog` source and a compiled `hog-build`, with `$HOG_SOURCE`
 pre-set; `hog-runtime` (`FROM alpine:3.21`) is the non-root, minimal serving
 base every deployment ends up on:

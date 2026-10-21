@@ -69,7 +69,7 @@ build manifest — no separate plugin list to keep in sync. An empty (or absent)
 Three layered Alpine images, each `FROM` the last, so you only build what you need:
 
 ```
-hog-builder  (FROM golang:1.26-alpine)
+hog-builder  (FROM golang:1.27-alpine)
       │  hog source + compiled `hog-build`
       ▼
 hog-runtime  (FROM alpine:3.21)

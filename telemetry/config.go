@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/paulopiriquito/hog/v2/config"
@@ -123,9 +122,8 @@ func FromResource(r config.Resource) (Config, error) {
 			return Config{}, fmt.Errorf("telemetry %q: unknown accessLog property %q", r.Metadata.Name, p)
 		}
 	}
-	denied := map[string]bool{"authorization": true, "cookie": true, "proxy-authorization": true, "set-cookie": true}
 	for _, h := range c.AccessLog.Headers {
-		if denied[strings.ToLower(h)] {
+		if isCredentialHeader(h) {
 			return Config{}, fmt.Errorf("telemetry %q: accessLog header %q is a credential and cannot be captured", r.Metadata.Name, h)
 		}
 	}

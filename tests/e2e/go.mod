@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog/tests/e2e
 
-go 1.26.3
+go 1.27
 
 require (
 	github.com/chromedp/cdproto v0.0.0-20260704091341-6ca7914c3938

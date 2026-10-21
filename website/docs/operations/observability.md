@@ -105,8 +105,9 @@ through even when you aren't exporting anything yet.
   be parsed at all — it never echoes an unparseable raw query that might
   carry a secret.
 - `accessLog.headers` **cannot** capture `Authorization`, `Cookie`,
-  `Proxy-Authorization`, or `Set-Cookie` — configuring one of these is a
-  startup error.
+  `Proxy-Authorization`, `Set-Cookie` or `X-Hog-Identity` — configuring one
+  of these is a startup error, and the middleware writes `REDACTED` for them
+  regardless, so a configuration built in code is held to the same rule.
 - Access tokens, refresh tokens, and session cookie values are never
   included in `input` to authorization policies, in log lines, or in span
   attributes anywhere in the codebase.

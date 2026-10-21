@@ -136,7 +136,7 @@ func TestRenderGoMod(t *testing.T) {
 	})
 	for _, want := range []string{
 		"module hogbin",
-		"go 1.26",
+		"go 1.27",
 		"replace github.com/paulopiriquito/hog/v2 => /src/hog",
 		"replace github.com/acme/geo => ./plugins/geo",
 	} {

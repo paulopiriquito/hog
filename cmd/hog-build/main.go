@@ -15,11 +15,11 @@ type replaceFlag []hogbuild.Replace
 
 func (r *replaceFlag) String() string { return "" }
 func (r *replaceFlag) Set(v string) error {
-	i := strings.Index(v, "=")
-	if i < 0 {
+	before, after, ok := strings.Cut(v, "=")
+	if !ok {
 		return fmt.Errorf("--replace must be <importpath>=<localdir>, got %q", v)
 	}
-	*r = append(*r, hogbuild.Replace{Path: v[:i], With: v[i+1:]})
+	*r = append(*r, hogbuild.Replace{Path: before, With: after})
 	return nil
 }
 

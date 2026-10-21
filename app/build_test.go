@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -750,9 +751,7 @@ func newBearerIdP(t *testing.T, clientID string) (issuer string, signAccess func
 	signAccess = func(claims map[string]any) string {
 		c := map[string]any{"iss": srv.URL, "aud": clientID, "sub": "user-123",
 			"iat": time.Now().Unix(), "exp": time.Now().Add(time.Hour).Unix()}
-		for k, v := range claims {
-			c[k] = v
-		}
+		maps.Copy(c, claims)
 		signer, err := jose.NewSigner(
 			jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: priv, KeyID: "k1"}},
 			(&jose.SignerOptions{}).WithType("JWT"))
@@ -1216,7 +1215,7 @@ spec: { match: /health, handler: { type: health }, access: { auth: public } }
 
 	var line map[string]any
 	found := false
-	for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if l == "" {
 			continue
 		}
@@ -1328,7 +1327,7 @@ spec: { match: /health, handler: { type: health }, access: { auth: public } }
 
 	var line map[string]any
 	found := false
-	for _, l := range strings.Split(strings.TrimSpace(buf.String()), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(buf.String()), "\n") {
 		if l == "" {
 			continue
 		}

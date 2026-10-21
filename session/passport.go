@@ -70,7 +70,7 @@ func matchesAny(dn string, patterns []string) bool {
 
 // extractCN returns the first cn= component's value (e.g. "cn=Foo,ou=x" → "Foo").
 func extractCN(dn string) string {
-	for _, part := range strings.Split(dn, ",") {
+	for part := range strings.SplitSeq(dn, ",") {
 		part = strings.TrimSpace(part)
 		if len(part) > 3 && strings.EqualFold(part[:3], "cn=") {
 			return part[3:]

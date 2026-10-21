@@ -151,8 +151,10 @@ See [authorization](authorization.md#how-a-decision-is-reached).
 - The access log redacts sensitive query parameters (`code`, `state`,
   `token`, `access_token`, `id_token`, `refresh_token`, `api_key`,
   `client_secret`, `password`, `assertion`) and refuses to capture
-  `Authorization`, `Cookie`, `Proxy-Authorization`, or `Set-Cookie` via
-  `accessLog.headers` (a startup error if you try).
+  `Authorization`, `Cookie`, `Proxy-Authorization`, `Set-Cookie` or
+  `X-Hog-Identity` via `accessLog.headers`: a startup error if you try, and
+  the middleware itself writes `REDACTED` for them, so a configuration
+  assembled in code cannot route a credential into the log either.
 
 See [observability](observability.md#credentials-are-never-logged-or-traced).
 

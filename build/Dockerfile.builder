@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # hog-builder: build-stage base — carries the hog source + the hog-build composer.
-FROM golang:1.26-alpine AS hog-builder
+FROM golang:1.27-alpine AS hog-builder
 RUN apk add --no-cache git
 # kustomize — render HOG config from base + overlays during the build stage
 ARG KUSTOMIZE_VERSION=v5.5.0

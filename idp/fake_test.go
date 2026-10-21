@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -148,9 +149,7 @@ func signWith(t *testing.T, priv *rsa.PrivateKey, iss, aud string, claims map[st
 		"iat": time.Now().Unix(),
 		"exp": time.Now().Add(time.Hour).Unix(),
 	}
-	for k, v := range claims {
-		c[k] = v
-	}
+	maps.Copy(c, claims)
 	signer, err := jose.NewSigner(
 		jose.SigningKey{Algorithm: jose.RS256, Key: jose.JSONWebKey{Key: priv, KeyID: "test-key"}},
 		(&jose.SignerOptions{}).WithType("JWT"),

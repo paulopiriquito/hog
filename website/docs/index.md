@@ -95,7 +95,7 @@ dependencies, no external control plane.
 
 ## Why v2
 
-HOG v2 is a clean-room rewrite on Go 1.26 and the standard library. It is **no
+HOG v2 is a clean-room rewrite on Go 1.27 and the standard library. It is **no
 longer a fork of KrakenD** — it is a native application gateway with its own
 architecture, configuration model, and extension system.
 

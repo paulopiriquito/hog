@@ -2,6 +2,8 @@
 // skeleton plus the two guarded developer slots.
 package chain
 
+import "slices"
+
 import "net/http"
 
 // Middleware wraps a handler, returning a handler.
@@ -19,8 +21,8 @@ func (f Func) Wrap(next http.Handler) http.Handler { return f(next) }
 // (runs first on the way in, last on the way out).
 func Compose(terminal http.Handler, mws ...Middleware) http.Handler {
 	h := terminal
-	for i := len(mws) - 1; i >= 0; i-- {
-		h = mws[i].Wrap(h)
+	for _, mw := range slices.Backward(mws) {
+		h = mw.Wrap(h)
 	}
 	return h
 }

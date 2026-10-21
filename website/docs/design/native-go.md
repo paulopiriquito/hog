@@ -2,7 +2,7 @@
 
 HOG v1 was a fork of KrakenD, built on KrakenD's core framework, Lura. HOG v2
 is a clean-room rewrite: no v1 code was reused, and the dependency on Lura was
-dropped. v2 is built directly on Go 1.26 and `net/http`.
+dropped. v2 is built directly on Go 1.27 and `net/http`.
 
 ## Why not a framework
 
