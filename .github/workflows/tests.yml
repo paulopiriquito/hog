@@ -31,4 +31,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       # ubuntu-latest ships google-chrome, which chromedp uses; Docker is preinstalled.
+      # Since the 2026-10-18 ubuntu-24.04 runner image, AppArmor's restriction
+      # on unprivileged user namespaces reaches that Chrome, which then aborts
+      # at startup with "No usable sandbox". Lifting the restriction for the
+      # job keeps Chrome's own sandbox in place, which --no-sandbox would not.
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: make e2e
