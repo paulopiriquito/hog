@@ -77,8 +77,8 @@ func ReadManifest(configPath string) ([]Plugin, error) {
 func parsePlugin(entry string) (Plugin, error) {
 	entry = strings.TrimSpace(entry)
 	path, ver := entry, ""
-	if i := strings.LastIndex(entry, "@"); i >= 0 {
-		path, ver = entry[:i], entry[i+1:]
+	if before, after, found := strings.CutLast(entry, "@"); found {
+		path, ver = before, after
 	}
 	if !validImportPath(path) {
 		return Plugin{}, fmt.Errorf("hogbuild: invalid plugin import path %q", entry)
@@ -102,7 +102,7 @@ func validImportPath(p string) bool {
 	if !strings.Contains(strings.SplitN(p, "/", 2)[0], ".") {
 		return false
 	}
-	for _, seg := range strings.Split(p, "/") {
+	for seg := range strings.SplitSeq(p, "/") {
 		if seg == ".." || seg == "." || seg == "" {
 			return false
 		}
@@ -138,7 +138,7 @@ func RenderMain(plugins []Plugin) string {
 // tidy` at build time (Task 2), so they are not written here.
 func RenderGoMod(opts Options) string {
 	var b strings.Builder
-	b.WriteString("module hogbin\n\ngo 1.26\n\n")
+	b.WriteString("module hogbin\n\ngo 1.27\n\n")
 	fmt.Fprintf(&b, "replace %s => %s\n", hogModule, modTarget(opts.HogSource))
 	for _, rp := range opts.Replaces {
 		fmt.Fprintf(&b, "replace %s => %s\n", rp.Path, modTarget(rp.With))

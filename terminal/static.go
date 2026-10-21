@@ -26,7 +26,7 @@ func cleanRequestPath(urlPath, stripPrefix string) (string, bool) {
 		p = strings.TrimPrefix(p, stripPrefix)
 	}
 	p = strings.TrimPrefix(p, "/")
-	for _, seg := range strings.Split(p, "/") {
+	for seg := range strings.SplitSeq(p, "/") {
 		if seg == "" || seg == "." {
 			continue
 		}

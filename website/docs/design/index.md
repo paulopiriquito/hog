@@ -7,7 +7,7 @@ configuration model, see [architecture](../architecture/index.md).
 
 A few decisions run through every subsystem:
 
-- **Standard-library-first.** HOG builds on Go 1.26 and `net/http` rather than
+- **Standard-library-first.** HOG builds on Go 1.27 and `net/http` rather than
   a web framework, using dependencies only where the standard library doesn't
   reach (OIDC, JWT, OPA).
 - **Secure by default, fail closed.** Sessions are encrypted end to end,
@@ -23,7 +23,7 @@ A few decisions run through every subsystem:
 ## Chapters
 
 - [Native Go, standard-library-first](native-go.md) — why v2 dropped its
-  KrakenD/Lura lineage for the Go 1.26 standard library.
+  KrakenD/Lura lineage for the Go standard library.
 - [Authentication and sessions](auth-model.md) — the BFF model, the encrypted
   session cookie, and API Bearer auth.
 - [Authorization](authorization.md) — the `kind: Policy` model and its

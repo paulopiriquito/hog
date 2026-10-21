@@ -2,9 +2,9 @@
 
 Release notes and upgrade guidance for HOG.
 
-- [**HOG v2.3.0**](v2.3.0.md) — the published images build with Go 1.27, so
-  a gateway or plugin module composed by `hog-builder` may declare `go 1.27`.
-  The module's own floor stays at Go 1.26.
+- [**HOG v2.3.0**](v2.3.0.md) — HOG moves to Go 1.27: the module floor, the
+  published images and the module `hog-build` composes move together, and the
+  code adopts the 1.27 library.
 - [**HOG v2.2.0**](v2.2.0.md) — an `IdP` can declare `verificationOnly`, so
   an instance that only verifies access tokens someone else issued needs
   neither a client secret nor a redirect URL.

@@ -302,10 +302,8 @@ func TestStateManagerSilentRefreshSingleFlight(t *testing.T) {
 	cookies := issueExpiringAT(t, m)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 50 {
+		wg.Go(func() {
 			got, err := readWithCookie(t, m, cookies[0])
 			if err != nil {
 				t.Errorf("concurrent read err: %v", err)
@@ -314,7 +312,7 @@ func TestStateManagerSilentRefreshSingleFlight(t *testing.T) {
 			if got.AccessToken != "new-at" {
 				t.Errorf("concurrent read AT = %q, want new-at", got.AccessToken)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if f.n != 1 {

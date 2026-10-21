@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml/badge.svg)](https://github.com/paulopiriquito/hog/actions/workflows/tests.yml)
 [![release](https://img.shields.io/github/v/release/paulopiriquito/hog?sort=semver)](https://github.com/paulopiriquito/hog/releases)
-[![Go](https://img.shields.io/badge/go-1.26-00ADD8?logo=go)](go.mod)
+[![Go](https://img.shields.io/badge/go-1.27-00ADD8?logo=go)](go.mod)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 **A standard-library-first Go application gateway** — a web server *and* backend-for-frontend
@@ -15,7 +15,7 @@ plane.
 
 📖 **Documentation:** <https://paulopiriquito.github.io/hog/>
 
-> **HOG v2 is a clean-room rewrite on Go 1.26 and the standard library. It is no longer a fork of
+> **HOG v2 is a clean-room rewrite on Go 1.27 and the standard library. It is no longer a fork of
 > KrakenD** — it is a native application gateway with its own architecture, configuration model,
 > and extension system. See [Why v2](https://paulopiriquito.github.io/hog/overview/why-v2/) and
 > [Migrating from v1](https://paulopiriquito.github.io/hog/releases/migrating-from-v1/).
@@ -105,7 +105,7 @@ make images  # build the container image family locally
 make docs    # build the documentation site
 ```
 
-Requires Go 1.26 or newer; the published images build with Go 1.27. `make e2e` requires Docker (or Podman).
+Requires Go 1.27. `make e2e` requires Docker (or Podman).
 
 ## Extending HOG
 

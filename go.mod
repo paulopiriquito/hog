@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog/v2
 
-go 1.26
+go 1.27
 
 require (
 	github.com/coreos/go-oidc/v3 v3.19.0

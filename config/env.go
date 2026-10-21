@@ -25,8 +25,8 @@ func ExpandEnv(s string, lookup func(string) (string, bool)) (string, error) {
 		s = s[i+end+1:]
 
 		name, def, hasDef := expr, "", false
-		if j := strings.Index(expr, ":-"); j >= 0 {
-			name, def, hasDef = expr[:j], expr[j+2:], true
+		if before, after, ok := strings.Cut(expr, ":-"); ok {
+			name, def, hasDef = before, after, true
 		}
 		if v, ok := lookup(name); ok {
 			b.WriteString(v)

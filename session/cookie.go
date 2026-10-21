@@ -59,10 +59,7 @@ func (s *sealer) open(value string, aad []byte) ([]byte, error) {
 // writeChunkedCookie splits value across <name>.0..N cookies and sets them.
 func writeChunkedCookie(w http.ResponseWriter, name, value string, secure bool) {
 	for i := 0; len(value) > 0; i++ {
-		n := maxChunk
-		if len(value) < n {
-			n = len(value)
-		}
+		n := min(len(value), maxChunk)
 		http.SetCookie(w, &http.Cookie{
 			Name:     fmt.Sprintf("%s.%d", name, i),
 			Value:    value[:n],

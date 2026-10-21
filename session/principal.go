@@ -1,5 +1,7 @@
 package session
 
+import "slices"
+
 import "context"
 
 // Principal is the authenticated user as seen by downstream middlewares, the
@@ -46,10 +48,8 @@ func FromContext(ctx context.Context) (*Principal, bool) {
 // InGroup reports whether the request's principal belongs to group g.
 func InGroup(ctx context.Context, g string) bool {
 	if p, ok := FromContext(ctx); ok {
-		for _, x := range p.Groups {
-			if x == g {
-				return true
-			}
+		if slices.Contains(p.Groups, g) {
+			return true
 		}
 	}
 	return false

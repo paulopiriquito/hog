@@ -5,6 +5,7 @@ package authz
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/paulopiriquito/hog/v2/session"
 	"gopkg.in/yaml.v3"
@@ -76,12 +77,7 @@ func anyGroup(have, want []string) bool {
 }
 
 func containsStr(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, v)
 }
 
 func stringify(v any) string {

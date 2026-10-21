@@ -1,6 +1,6 @@
 module github.com/paulopiriquito/hog/plugins/statestore-valkey
 
-go 1.26
+go 1.27
 
 require (
 	github.com/paulopiriquito/hog/v2 v2.1.0

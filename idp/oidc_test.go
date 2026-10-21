@@ -207,7 +207,7 @@ func TestPKCEOptional(t *testing.T) {
 	// pkce: false ⇒ no challenge
 	no, err := newOIDC(context.Background(), oidcConfig{
 		Type: "oidc", Issuer: f.srv.URL, ClientID: f.clientID, ClientSecret: "s",
-		RedirectURL: "https://app/cb", PKCE: boolPtr(false),
+		RedirectURL: "https://app/cb", PKCE: new(false),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,8 @@ func TestPKCEOptional(t *testing.T) {
 	}
 }
 
-func boolPtr(b bool) *bool { return &b }
+//go:fix inline
+func boolPtr(b bool) *bool { return new(b) }
 
 func TestVerifyAccessTokenRejections(t *testing.T) {
 	f := newFakeIdPNoAccessJWKS(t, "client-1")
@@ -351,7 +352,7 @@ func TestVerifyAccessTokenRequireAudienceFalseAcceptsNoAudience(t *testing.T) {
 	f := newFakeIdP(t, "client-1")
 	oi, err := newOIDC(context.Background(), oidcConfig{
 		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
-		Bearer: &bearerConfig{RequireAudience: boolPtr(false)},
+		Bearer: &bearerConfig{RequireAudience: new(false)},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -434,7 +435,7 @@ func TestNewOIDCRejectsRequireAudienceFalseWithAudienceClaim(t *testing.T) {
 	f := newFakeIdP(t, "client-1")
 	_, err := newOIDC(context.Background(), oidcConfig{
 		Issuer: f.srv.URL, ClientID: "client-1", ClientSecret: "s", RedirectURL: "https://app/cb",
-		Bearer: &bearerConfig{RequireAudience: boolPtr(false), AudienceClaim: "client_id"},
+		Bearer: &bearerConfig{RequireAudience: new(false), AudienceClaim: "client_id"},
 	})
 	if err == nil {
 		t.Fatal("want error combining bearer.requireAudience:false with bearer.audienceClaim")

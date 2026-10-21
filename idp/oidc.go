@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -186,10 +187,8 @@ func claimHas(v any, want string) bool {
 			}
 		}
 	case []string:
-		for _, s := range t {
-			if s == want {
-				return true
-			}
+		if slices.Contains(t, want) {
+			return true
 		}
 	}
 	return false
