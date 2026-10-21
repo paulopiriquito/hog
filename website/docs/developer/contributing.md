@@ -39,8 +39,10 @@ framework-mode consumer depends on.
 
 ## Conventions
 
-- **Go 1.26**, no exceptions — check `go.mod` before assuming a newer or
-  older language feature is available.
+- **Go 1.26 is the floor**, no exceptions — `go.mod` declares it, so check
+  there before assuming a newer language or library feature is available.
+  The suite also runs on Go 1.27, which is what the published images build
+  with; code must pass on both.
 - **Standard-library-first.** `net/http`, `log/slog`, `os.Root`, and friends
   are preferred over a dependency. The current dependency list is
   deliberately short: OIDC (`coreos/go-oidc`), JWT (`go-jose`), policy

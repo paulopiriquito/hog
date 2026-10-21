@@ -105,7 +105,7 @@ make images  # build the container image family locally
 make docs    # build the documentation site
 ```
 
-Requires Go 1.26. `make e2e` requires Docker (or Podman).
+Requires Go 1.26 or newer; the published images build with Go 1.27. `make e2e` requires Docker (or Podman).
 
 ## Extending HOG
 

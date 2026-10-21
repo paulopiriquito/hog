@@ -84,7 +84,7 @@ session-terminating one has session state to think about.
 
 HOG ships as a small set of Docker build stages:
 
-- **`hog-runtime`** — the base runtime image: a `golang:1.26-alpine` build
+- **`hog-runtime`** — the base runtime image: a `golang:1.27-alpine` build
   stage compiles `cmd/hog`, and the runtime stage is a minimal Alpine image
   running as a non-root user (`hog`, uid/gid `10001`). It exposes port
   `8080` — matching the `Gateway`'s default `listen` address — and starts as

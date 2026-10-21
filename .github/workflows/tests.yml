@@ -11,11 +11,18 @@ concurrency:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # go.mod declares the floor; the published images build with the
+        # newest entry, so both ends of the supported range run the suite.
+        go: ["1.26", "1.27"]
+    name: unit (go ${{ matrix.go }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: ${{ matrix.go }}
           cache: true
       - run: make fmt vet
       - run: go mod tidy && git diff --exit-code go.mod go.sum
