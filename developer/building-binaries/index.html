@@ -2140,6 +2140,8 @@
       
         
       
+        
+      
     
     
     
@@ -2192,6 +2194,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../releases/v2.3.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HOG v2.3.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -2514,7 +2544,7 @@ plugin source into the build context before the <code>RUN hog-build ...</code> s
 the replace target exists when the build runs.</p>
 <h2 id="the-two-stage-dockerfile">The two-stage Dockerfile<a class="headerlink" href="#the-two-stage-dockerfile" title="Anchor link to this section">&para;</a></h2>
 <p>A custom-plugin image is a two-stage build: <code>hog-builder</code> composes the
-binary, <code>hog-runtime</code> serves it. <code>hog-builder</code> (<code>FROM golang:1.26-alpine</code>)
+binary, <code>hog-runtime</code> serves it. <code>hog-builder</code> (<code>FROM golang:1.27-alpine</code>)
 carries the <code>hog</code> source and a compiled <code>hog-build</code>, with <code>$HOG_SOURCE</code>
 pre-set; <code>hog-runtime</code> (<code>FROM alpine:3.21</code>) is the non-root, minimal serving
 base every deployment ends up on:</p>
@@ -2579,7 +2609,7 @@ for the base/overlay layout and a complete worked example.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 8, 2026 22:58:15 UTC"><span class="timeago" datetime="2026-07-08T22:58:15+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 8, 2026 22:58:15 UTC">2026-07-08</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="October 21, 2026 21:29:40 UTC"><span class="timeago" datetime="2026-10-21T21:29:40+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="October 21, 2026 21:29:40 UTC">2026-10-21</span>
   </span>
 
     
