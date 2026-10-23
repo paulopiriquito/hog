@@ -113,7 +113,7 @@ docker run --read-only --tmpfs /tmp \
    there's no session cookie yet, HOG responds `302` to
    `/auth/login?return_to=%2F`.
 2. `/auth/login` seals `state`/`nonce` (and a PKCE verifier, on by default)
-   into a short-lived `hog_login` cookie and redirects to your IdP's
+   into a short-lived `hog_login_<id>` cookie and redirects to your IdP's
    authorization endpoint.
 3. You authenticate at the IdP and it redirects back to
    `http://localhost:8080/auth/callback?code=...&state=...`.
@@ -144,7 +144,7 @@ before proxying, and HOG rewrites the request before it reaches
   always removed first, so this is the only way a bearer token reaches the
   backend.
 - **No `Cookie` header** — stripped by default (`forwardCookies: false`), so
-  the backend never sees `hog_session` or `hog_login`.
+  the backend never sees `hog_session` or the `hog_login_<id>` cookies.
 
 ## Next steps
 

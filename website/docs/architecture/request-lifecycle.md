@@ -73,10 +73,11 @@ never to authenticate a request by itself. A missing or invalid credential
 does not reject the request here; it simply leaves it unauthenticated.
 
 **auth-gate** enforces the route's effective `auth: required|public` setting.
-This is the stage that turns a missing identity into a rejection: a browser
-(`app`) route gets a `302` redirect to the login path with the original URL
-preserved as `return_to`; a `service` route gets a `401` with a
-`WWW-Authenticate` header.
+This is the stage that turns a missing identity into a rejection: a
+navigation to a browser (`app`) route gets a `302` redirect to the login
+path with the original URL preserved as `return_to`, and any other request
+to it (`Sec-Fetch-Mode` other than `navigate`) gets a `401`; a `service`
+route gets a `401` with a `WWW-Authenticate` header.
 
 **authz** evaluates the route's effective authorization set — its own
 `access.authorize` plus every matching `RouteGroup`'s — against the resolved

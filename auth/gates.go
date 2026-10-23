@@ -39,18 +39,33 @@ func loginRedirectURL(loginPath, returnTo string) string {
 	return u.String()
 }
 
+// startsLogin reports whether an unauthenticated request to an app route is sent
+// to the login path. Only a navigation is: a browser marks one with
+// Sec-Fetch-Mode: navigate. A favicon, a stylesheet or a fetch() gets 401
+// instead, so a request the person never sees cannot start a sign-in of its own
+// in the middle of theirs. A client that sends no Fetch Metadata keeps the
+// redirect.
+func startsLogin(r *http.Request) bool {
+	mode := r.Header.Get("Sec-Fetch-Mode")
+	return mode == "" || mode == "navigate"
+}
+
 // AuthGate enforces a route's auth requirement. When required and there is no
-// principal in context: an App route redirects (302) to loginPath with a
-// return_to of the current request URI; a Service route returns 401. When not
-// required, or a principal is present, it passes through.
+// principal in context: an App route redirects (302) a navigation to loginPath
+// with a return_to of the current request URI and answers anything else with
+// 401; a Service route returns 401. When not required, or a principal is
+// present, it passes through.
 func AuthGate(required, isApp bool, loginPath string) chain.Middleware {
 	return chain.Func(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if required {
 				if _, ok := session.FromContext(r.Context()); !ok {
-					if isApp {
+					switch {
+					case isApp && startsLogin(r):
 						http.Redirect(w, r, loginRedirectURL(loginPath, r.URL.RequestURI()), http.StatusFound)
-					} else {
+					case isApp:
+						http.Error(w, "unauthorized", http.StatusUnauthorized)
+					default:
 						w.Header().Set("WWW-Authenticate", bearerChallenge(r.Context()))
 						http.Error(w, "unauthorized", http.StatusUnauthorized)
 					}
