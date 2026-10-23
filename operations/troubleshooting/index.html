@@ -2142,6 +2142,8 @@
       
         
       
+        
+      
     
     
     
@@ -2194,6 +2196,34 @@
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
             
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../releases/v2.3.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    HOG v2.3.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
               
             
               
@@ -2577,12 +2607,12 @@ which one you're getting:</p>
 <tbody>
 <tr>
 <td><code>400 login session expired; please restart sign-in</code></td>
-<td>No <code>hog_login</code> cookie on the callback request.</td>
+<td>No login cookie for this callback's <code>state</code> on the request.</td>
 <td>The login attempt is more than 10 minutes old, the browser dropped the cookie, or the user opened the callback URL directly/replayed it.</td>
 </tr>
 <tr>
 <td><code>400 login session invalid; please restart sign-in</code></td>
-<td>The <code>hog_login</code> cookie failed to decrypt.</td>
+<td>The login cookie failed to decrypt.</td>
 <td><code>session.key</code> changed mid-flow (a deploy/rotation), or the cookie was tampered with.</td>
 </tr>
 <tr>
@@ -2607,6 +2637,9 @@ which one you're getting:</p>
 </tr>
 </tbody>
 </table>
+<p>The three <code>400</code>s about the login session and the <code>state</code> are only returned
+to a browser without a valid session. When the browser already holds one,
+another sign-in finished first, and the callback redirects to <code>/</code> instead.</p>
 <p>If HOG <strong>fails to start</strong> rather than serving any of the above, <code>IdP.spec</code>
 discovery against <code>issuer</code> failed — HOG performs OIDC discovery once at
 boot and fails fast on a bad or unreachable issuer, rather than retrying
@@ -2665,7 +2698,7 @@ the underlying settings.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"/></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 8, 2026 21:08:36 UTC"><span class="timeago" datetime="2026-07-08T21:08:36+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 8, 2026 21:08:36 UTC">2026-07-08</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="October 23, 2026 21:36:43 UTC"><span class="timeago" datetime="2026-10-23T21:36:43+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="October 23, 2026 21:36:43 UTC">2026-10-23</span>
   </span>
 
     
