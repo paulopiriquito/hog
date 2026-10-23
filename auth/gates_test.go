@@ -180,3 +180,24 @@ func TestAuthGateServiceChallengeInvalidToken(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 }
+
+func TestAuthGateAppRedirectsOnlyNavigations(t *testing.T) {
+	h := chain.Compose(passProbe(), AuthGate(true, true, "/auth/login"))
+	for mode, want := range map[string]int{
+		"navigate":    http.StatusFound,
+		"no-cors":     http.StatusUnauthorized, // a favicon, an image, a stylesheet
+		"cors":        http.StatusUnauthorized, // fetch()
+		"same-origin": http.StatusUnauthorized,
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/web/icon.svg", nil)
+		req.Header.Set("Sec-Fetch-Mode", mode)
+		h.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("Sec-Fetch-Mode %s: status = %d, want %d", mode, rec.Code, want)
+		}
+		if want == http.StatusUnauthorized && (rec.Header().Get("Location") != "" || rec.Header().Get("WWW-Authenticate") != "") {
+			t.Fatalf("Sec-Fetch-Mode %s: unexpected headers %v", mode, rec.Header())
+		}
+	}
+}

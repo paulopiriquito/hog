@@ -92,12 +92,16 @@ which one you're getting:
 
 | Response | Meaning | Likely cause |
 |---|---|---|
-| `400 login session expired; please restart sign-in` | No `hog_login` cookie on the callback request. | The login attempt is more than 10 minutes old, the browser dropped the cookie, or the user opened the callback URL directly/replayed it. |
-| `400 login session invalid; please restart sign-in` | The `hog_login` cookie failed to decrypt. | `session.key` changed mid-flow (a deploy/rotation), or the cookie was tampered with. |
+| `400 login session expired; please restart sign-in` | No login cookie for this callback's `state` on the request. | The login attempt is more than 10 minutes old, the browser dropped the cookie, or the user opened the callback URL directly/replayed it. |
+| `400 login session invalid; please restart sign-in` | The login cookie failed to decrypt. | `session.key` changed mid-flow (a deploy/rotation), or the cookie was tampered with. |
 | `400 identity provider returned an error` | The IdP redirected back with an `error` query parameter. | The user denied consent, or the IdP rejected the request (misconfigured client at the IdP). |
 | `400 invalid authentication response` | Missing `code`, or `state` doesn't match what HOG issued. | A stale/replayed callback URL, or a `state` mismatch (possible CSRF attempt, correctly rejected). |
 | `502 authentication failed` | Code exchange or the userinfo fetch failed. | `clientSecret` is wrong, `redirectURL` doesn't exactly match what's registered at the IdP, or HOG can't reach the IdP's token/userinfo endpoint from where it runs. |
 | `500 internal error` | Session issuance failed after a successful exchange. | Usually a `stateProvider` store write failure in delegated-state mode. |
+
+The three `400`s about the login session and the `state` are only returned
+to a browser without a valid session. When the browser already holds one,
+another sign-in finished first, and the callback redirects to `/` instead.
 
 If HOG **fails to start** rather than serving any of the above, `IdP.spec`
 discovery against `issuer` failed — HOG performs OIDC discovery once at

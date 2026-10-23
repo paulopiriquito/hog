@@ -128,10 +128,14 @@ spec:
   access: { auth: required }
 ```
 
-An unauthenticated request to a required **app** route gets a `302` redirect
-to `loginPath` with `?return_to=<original URI>` (validated to be a local
-path — no open redirect). A required **service** route instead returns
-`401` with a `WWW-Authenticate` header.
+An unauthenticated navigation to a required **app** route gets a `302`
+redirect to `loginPath` with `?return_to=<original URI>` (validated to be a
+local path — no open redirect). Only a navigation does: a request the
+browser marks with any other `Sec-Fetch-Mode` (a favicon, an image, a
+stylesheet, a `fetch()`) gets a plain `401`, so it cannot start a sign-in
+of its own while the person is at the IdP. A client that sends no Fetch
+Metadata, such as `curl`, keeps the redirect. A required **service** route
+returns `401` with a `WWW-Authenticate` header.
 
 ## The endpoints
 

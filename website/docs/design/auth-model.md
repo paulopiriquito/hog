@@ -10,9 +10,17 @@ protocol on the browser's behalf — the single-page app never sees a token.
 Login is the OIDC Authorization Code flow with PKCE enabled by default (it
 can be turned off for confidential clients that don't need it). HOG issues
 `state` and `nonce`, carries them across the redirect in a short-lived,
-encrypted `hog_login` cookie, and validates both on return — this keeps the
+encrypted login cookie, and validates both on return — this keeps the
 login round trip stateless and cluster-safe: any replica can complete a
 callback a different replica started.
+
+Each sign-in gets its own login cookie, `hog_login_<id>`, where the id is
+derived from that sign-in's `state`. Two sign-ins can be in flight in one
+browser at once (two tabs, or a tab and a request the person never sees),
+and neither can overwrite the other's `state`. Only a navigation starts a
+sign-in in the first place: the auth gate redirects a request to the login
+path only when the browser marks it `Sec-Fetch-Mode: navigate`, and answers
+a favicon, a stylesheet or a `fetch()` with `401`.
 
 Once the IdP redirects back with a code, HOG exchanges it, verifies the ID
 token against the IdP's JWKS, and — only when the configured identity model

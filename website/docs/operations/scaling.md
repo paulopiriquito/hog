@@ -10,7 +10,7 @@ HTTP service.
 Run as many replicas as you want behind a load balancer. Any replica can
 serve any request — including completing an OIDC login flow a different
 replica started, since the transient login state (`state`, `nonce`, PKCE
-verifier) travels in a short-lived, encrypted `hog_login` cookie, not
+verifier) travels in a short-lived, encrypted `hog_login_<id>` cookie, not
 server-side memory.
 
 Rolling updates are safe: because there's no coordination between

@@ -2,6 +2,9 @@
 
 Release notes and upgrade guidance for HOG.
 
+- [**HOG v2.3.1**](v2.3.1.md) — only a navigation starts a sign-in, each
+  sign-in carries its own login cookie, and a callback that lost its sign-in
+  sends a person who is already signed in on to the app.
 - [**HOG v2.3.0**](v2.3.0.md) — HOG moves to Go 1.27: the module floor, the
   published images and the module `hog-build` composes move together, and the
   code adopts the 1.27 library.

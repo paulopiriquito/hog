@@ -15,7 +15,7 @@ import (
 var loginAAD = []byte("hog/login/v1")
 
 // loginState is the transient state carried across login → IdP → callback in the
-// short-lived encrypted hog_login cookie. Verifier is empty when PKCE is disabled.
+// short-lived encrypted hog_login_<id> cookie of its sign-in. Verifier is empty when PKCE is disabled.
 type loginState struct {
 	State    string `json:"s"`
 	Nonce    string `json:"n"`
